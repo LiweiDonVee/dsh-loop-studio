@@ -25,7 +25,7 @@ CI 在 Ubuntu 与 Windows 上运行依赖冻结安装、check 和打包，安装
 
 ## 原生验收
 
-先构建安装包，准备官方 DSH 0.2.1-rc.2 和 Playwright Chromium：
+先构建安装包，准备官方 DSH（本轮使用 0.2.1-rc.5）和 Playwright Chromium：
 
 ```powershell
 pnpm exec playwright install chromium
@@ -37,7 +37,9 @@ pnpm smoke
 
 脚本创建 `.runtime/loop-smoke-*` 下的新 DSH home，安装刚生成的包，并注册合成提供方。标准/自定义预设、显式/隐式模型、首步与续步不同路由、关闭恢复、实际 UI 选模型保存、装配后卸载边界、全屏与窄窗口都会检查。模型适配器是本地确定性 fixture，不发送付费请求或读取用户卡库。
 
-结果和截图在 `.runtime/loop-evidence/`；`acceptance.json` 含受测包 SHA256。支持范围与已验证结果见 [验收记录](acceptance.md)。
+脚本从本仓库 `package.json` 选择对应版本的 `artifacts/` 安装包，并读取实际 CLI 版本。结果和截图在 `.runtime/loop-evidence/`；`acceptance.json` 含受测包 SHA256 和实际宿主版本。支持范围与已验证结果见 [验收记录](acceptance.md)。
+
+0.1.1 的组件回归还检查 Studio 注册/卸载时 header 与 hero 入口同时隐藏/恢复，以及订阅释放。与 RP Studio 1.5.0 联用的聚合菜单、390px 布局和 14px/20px 字体矩阵使用七包隔离原生验收，独立记录受测包与截图；不要用旧版原生记录代替新包证据。
 
 ## 维护边界
 

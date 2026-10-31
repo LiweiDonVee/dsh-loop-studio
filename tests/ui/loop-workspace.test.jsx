@@ -358,7 +358,7 @@ describe('Loop Studio native entry points', () => {
     const registrations = new Map()
     const ctx = {
       effect: callback => { const dispose = callback(); if (dispose) releases.push(dispose) },
-      sidebarRightTabs: { register: vi.fn(() => vi.fn()) },
+      sidebarRightTabs: { register: vi.fn(() => vi.fn()), get: () => undefined, subscribe: () => () => {} },
       sidebarRight: { openTab: vi.fn() },
       slots: {
         inject: (_name, callback) => callback(),
@@ -380,5 +380,31 @@ describe('Loop Studio native entry points', () => {
     expect(ctx.sidebarRight.openTab.mock.calls).toEqual([[TAB_KIND], [TAB_KIND]])
     for (const release of releases.reverse()) release()
     expect(style.isConnected).toBe(false)
+  })
+
+  it('keeps header and hero entries standalone, then hides and restores both as Studio registers and unloads', () => {
+    const releases = [], registrations = new Map(), listeners = new Set()
+    let studio
+    const ctx = {
+      effect: callback => { const release = callback(); if (release) releases.push(release) },
+      sidebarRightTabs: { register: () => () => {}, get: kind => kind === 'rp-studio' ? studio : undefined, subscribe: listener => { listeners.add(listener); return () => listeners.delete(listener) } },
+      sidebarRight: { openTab: vi.fn() },
+      slots: { inject: (_name, callback) => callback(), register: (options, Component) => { registrations.set(options.name, { options, Component }); return () => {} } },
+    }
+    apply(ctx)
+    const Header = registrations.get('conversation.session.header.actions'), Hero = registrations.get('conversation.hero.options')
+    const view = render(<><Header.Component {...Header.options.inject()} /><Hero.Component {...Hero.options.inject()} /></>)
+    const entryButtons = () => screen.queryAllByRole('button', { name: '打开 Loop Studio' })
+    expect(entryButtons()).toHaveLength(2)
+    fireEvent.click(entryButtons()[0])
+    fireEvent.click(entryButtons()[1])
+    expect(ctx.sidebarRight.openTab.mock.calls).toEqual([[TAB_KIND], [TAB_KIND]])
+    act(() => { studio = { id: 'dsh-rp-studio/workspace', kind: 'rp-studio' }; listeners.forEach(listener => listener()) })
+    expect(entryButtons()).toHaveLength(0)
+    act(() => { studio = undefined; listeners.forEach(listener => listener()) })
+    expect(entryButtons()).toHaveLength(2)
+    view.unmount()
+    expect(listeners.size).toBe(0)
+    for (const release of releases.reverse()) release()
   })
 })
