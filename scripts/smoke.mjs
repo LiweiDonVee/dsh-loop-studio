@@ -8,16 +8,19 @@ await mkdir(home,{recursive:true});await mkdir(evidence,{recursive:true})
 // A standalone repository declares dsh.client. Give the server-only fixture
 // its own package boundary so the Loader cannot inherit the plugin manifest.
 await writeFile(join(home,'package.json'),JSON.stringify({name:'loop-studio-smoke-home',private:true,type:'module'}))
-const artifactSha256=createHash('sha256').update(await readFile('artifacts/dsh-loop-studio-0.1.0.tgz')).digest('hex')
+const manifest=JSON.parse(await readFile('package.json','utf8'))
+const artifact=resolve(`artifacts/${manifest.name}-${manifest.version}.tgz`)
+const artifactSha256=createHash('sha256').update(await readFile(artifact)).digest('hex')
 await writeFile(join(evidence,'acceptance.json'),JSON.stringify({passed:false,status:'running',artifactSha256}))
 const cli=process.env.DSH_BIN??join(process.env.LOCALAPPDATA,'Programs/DeepSeek Harness/resources/runtime/cli/bin/dsh.cmd')
 const quote=value=>process.platform==='win32'?`"${value}"`:value
 const env={...process.env,DSH_HOME:home,DEEPSEEK_API_KEY:'loop-smoke-placeholder-unused'}
 const run=args=>new Promise((done,reject)=>{
   const child=spawn(quote(cli),args,{shell:process.platform==='win32',windowsHide:true,cwd:root,env,stdio:'pipe'});let log=''
-  child.stdout.on('data',b=>log+=b);child.stderr.on('data',b=>log+=b);child.on('error',reject);child.on('exit',code=>code===0?done():reject(Error('DSH install failed: '+log)))
+  child.stdout.on('data',b=>log+=b);child.stderr.on('data',b=>log+=b);child.on('error',reject);child.on('exit',code=>code===0?done(log):reject(Error('DSH command failed: '+log)))
 })
-await run(['plugin','--profile','web','add',quote(resolve('artifacts/dsh-loop-studio-0.1.0.tgz'))])
+const hostVersion=(await run(['--version'])).trim()
+await run(['plugin','--profile','web','add',quote(artifact)])
 const patch=join(home,'probe.patch.yml')
 const probePlugin=join(home,'native-probe.mjs')
 await writeFile(probePlugin,await readFile('tests/fixtures/native-probe.mjs','utf8'))
@@ -94,7 +97,7 @@ try{
   if(boundaryCalls.length!==2||boundaryCalls[0].model!=='fast'||boundaryCalls[1].model!=='configured'||boundaryCalls.some(c=>c.promptRoute!==c.provider+'/'+c.model))throw Error('Captured-step drain did not preserve route/prompt boundary '+JSON.stringify(boundary))
   results.push({preset:'standard',boundary:'close-after-assembly',routes:boundaryCalls.map(c=>c.provider+'/'+c.model)})
   if(errors.length)throw Error('Browser errors: '+JSON.stringify(errors))
-  const result={passed:true,artifactSha256,host:'DSH 0.2.1-rc.2',results,metrics,narrow,errors}
+  const result={passed:true,artifactSha256,host:`DSH ${hostVersion}`,results,metrics,narrow,errors}
   await writeFile(join(evidence,'acceptance.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result))
 }catch(error){await writeFile(join(evidence,'acceptance.json'),JSON.stringify({passed:false,status:'failed',artifactSha256,error:redact(error.message)}));console.error(error.message);console.error(redact(logs.slice(-8000)));process.exitCode=1}
 finally{await browser?.close();if(host.pid){if(process.platform==='win32')await new Promise(done=>execFile('taskkill.exe',['/PID',String(host.pid),'/T','/F'],{windowsHide:true},done));else host.kill('SIGTERM')}}

@@ -20,16 +20,16 @@ Native DSH plugin for inspecting agent loops and routing supported model stages 
 
 ## 安装
 
-已验证宿主：**DSH 0.2.1-rc.2**。发布包自包含，不需要 Node、pnpm 或本仓库源码；宿主自带运行环境。
+0.1.1 本轮验证目标：**DSH 0.2.1-rc.5**；各次实测结果见[验收记录](docs/acceptance.md)。发布包自包含，不需要 Node、pnpm 或本仓库源码；宿主自带运行环境。
 
-1. 在 [Releases](https://github.com/LiweiDonVee/dsh-loop-studio/releases/latest) 下载 `dsh-loop-studio-0.1.0.tgz`。
+1. 在 [Releases](https://github.com/LiweiDonVee/dsh-loop-studio/releases/latest) 下载 `dsh-loop-studio-0.1.1.tgz`。
 2. 完全退出 DSH，包括后台进程。在安装包目录打开终端：
 
 ```powershell
-dsh plugin --profile desktop add ./dsh-loop-studio-0.1.0.tgz
+dsh plugin --profile desktop add ./dsh-loop-studio-0.1.1.tgz
 ```
 
-3. 重启 DSH，进入会话，点击顶部的 **Loop**；空白会话的输入区上方也有入口。也可从右侧新增页签导航打开 **Loop Studio**。
+3. 重启 DSH，单独安装时点击会话顶部的 **Loop**；空白会话的输入区上方也有入口。搭配 **RP Studio 1.5.0** 时，从 **RP ▾ → 流程与模型** 打开；独立 Loop 顶栏入口自动收起，停用 Studio 后恢复。也可从右侧新增页签导航打开 **Loop Studio**。
 
 使用 Web 模式时将 `desktop` 改为 `web`。插件支持宿主侧栏拉宽、全屏和关闭。
 
@@ -37,10 +37,10 @@ dsh plugin --profile desktop add ./dsh-loop-studio-0.1.0.tgz
 
 ```powershell
 $dshCli = Join-Path $env:LOCALAPPDATA 'Programs/DeepSeek Harness/resources/runtime/cli/bin/dsh.cmd'
-& $dshCli plugin --profile desktop add ./dsh-loop-studio-0.1.0.tgz
+& $dshCli plugin --profile desktop add ./dsh-loop-studio-0.1.1.tgz
 ```
 
-自定义安装位置请改为相应启动器路径。升级同样使用 `plugin add` 安装新版本，重启后生效。发布页附 `SHA256SUMS.txt`，可用 `Get-FileHash ./dsh-loop-studio-0.1.0.tgz -Algorithm SHA256` 核对。
+自定义安装位置请改为相应启动器路径。升级同样使用 `plugin add` 安装新版本，重启后生效。发布页附 `SHA256SUMS.txt`，可用 `Get-FileHash ./dsh-loop-studio-0.1.1.tgz -Algorithm SHA256` 核对。
 
 ## 第一次配置
 
@@ -62,7 +62,7 @@ $dshCli = Join-Path $env:LOCALAPPDATA 'Programs/DeepSeek Harness/resources/runti
 | [RP 最后一步](https://github.com/LiweiDonVee/dsh-rp-last-step) | ST 迁移、热组装、最终正文 | 可选 |
 | [RP Studio](https://github.com/LiweiDonVee/dsh-rp-studio) | 原生故事阅读、角色状态与档案 | 可选 |
 
-RP 最后一步安装后会注册自己的三个模型阶段，Loop Studio 无需包含 RP 逻辑。所有模型都必须已经在 DSH 中可用，插件不复制密钥、不启动模型代理，也不在某个模型失败后暗中切换提供方。
+RP 最后一步安装后会注册自己的三个模型阶段，Loop Studio 无需包含 RP 逻辑。有无 RP Studio，普通会话的通用流程与模型功能都可使用；RP 菜单只整合入口。界面字体、表单和字号跟随宿主设置。所有模型都必须已经在 DSH 中可用，插件不复制密钥、不启动模型代理，也不在某个模型失败后暗中切换提供方。
 
 ## 数据与恢复
 
@@ -84,6 +84,6 @@ pnpm check
 pnpm package
 ```
 
-产物为 `artifacts/dsh-loop-studio-0.1.0.tgz` 和 `artifacts/SHA256SUMS.txt`。完整原生验收：`pnpm smoke`，另需已安装的官方 DSH 和 Playwright Chromium。说明见 [开发文档](docs/development.md)。
+产物为 `artifacts/dsh-loop-studio-0.1.1.tgz` 和 `artifacts/SHA256SUMS.txt`。完整原生验收：`pnpm smoke`，另需已安装的官方 DSH 和 Playwright Chromium。说明见 [开发文档](docs/development.md)。
 
 项目使用 MIT 许可证。最初实现源自 [RP Studio 的集成版本](https://github.com/LiweiDonVee/dsh-rp-studio/commit/f0c7cbba469b28b730b8b895ed2250c1d235fc77)，本仓库是 Loop Studio 后续开发与发布的主仓库。
