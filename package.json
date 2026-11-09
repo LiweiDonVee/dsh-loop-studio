@@ -1,6 +1,6 @@
 {
   "name": "dsh-loop-studio",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "原生图形化查看 DSH agent loop，分析预设并配置模型节点",
   "license": "MIT",
   "type": "module",
@@ -18,7 +18,7 @@
   ],
   "engines": {
     "node": ">=24",
-    "dsh": ">=0.2.1-rc.2 <0.3.0-0"
+    "dsh": ">=0.2.2-rc.1 <0.3.0-0"
   },
   "dsh": {
     "bundle": {
@@ -41,7 +41,9 @@
     "test:ui": "vitest run",
     "check": "pnpm lint && pnpm test && pnpm build",
     "package": "pnpm build && node scripts/pack.mjs",
-    "smoke": "node scripts/smoke.mjs"
+    "smoke": "node scripts/native-routing.mjs && node scripts/native-routing-cold.mjs && node scripts/native-control-cold.mjs",
+    "test:native-routing": "node scripts/native-routing.mjs && node scripts/native-routing-cold.mjs && node scripts/native-control-cold.mjs",
+    "smoke:legacy-rc2": "node scripts/smoke.mjs"
   },
   "peerDependencies": {
     "react": "^18.3.1"
