@@ -2,28 +2,22 @@ import { randomUUID } from 'node:crypto'
 import { buildGraph, mergeParticipants, resolvePolicy, validatePolicy, freeze, modelNodeId, projectTraceEvent, tokenMetadata, LoopError } from './core.mjs'
 import { createPolicyStore } from './store.mjs'
 import { createLoopRoutes } from './routes.mjs'
+import { createRoutingJournal } from './routing-journal.mjs'
+import { createAgentRouter } from './routing.mjs'
 
 export const name = 'loop-studio'
 export const inject = ['connection', 'typertGateway', 'agents', 'llm']
 const TRACE_LIMIT = 256
-const routeFields = ['provider', 'model', 'reasoningEffort', 'maxTokens']
-const sameConfig = (left, right) => left && right && routeFields.every(key => left[key] === right[key])
-const sameRoute = (left, right) => left && right && left.provider === right.provider && left.model === right.model
-const routeConfig = value => Object.fromEntries(routeFields.filter(key => value?.[key] !== undefined).map(key => [key, value[key]]))
-const headerProposal = header => {
-  const config = { ...header.config }
-  for (const key of ['reasoningEffort', 'maxTokens']) if (header.adapterDefaults?.[key] === true) delete config[key]
-  return config
-}
-
-/** DSH rc.2 has no public driver discriminator. Custom drivers stay observe-only. */
+/** Custom drivers retain observation; the rc.1 driver exposes the Model API. */
 function supportedAgent(ctx, agent) {
   return Boolean(ctx.get('agentLoop')) && agent?.constructor?.name === 'ReactLoopAgent'
+    && typeof agent.model?.current === 'function' && typeof agent.model?.select === 'function'
 }
 
 /** Connect public DSH registries and scoped waterfalls to the independent kernel. */
 export async function createLoopHost(ctx, options = {}) {
   const store = options.store ?? await createPolicyStore()
+  const journal = options.journal ?? createRoutingJournal(options.journalOptions)
   let stopped = false
   const attached = new Map()
   const participants = new Map()
@@ -70,80 +64,20 @@ export async function createLoopHost(ctx, options = {}) {
     return trace
   }
 
-  function baseline(record, config) {
-    const underlying = { ...config }
-    if (record.lastApplied) {
-      for (const key of record.ownedFields) {
-        // Route identity and its effort belong together. Output limits remain
-        // independently inherited by DSH even after a host model selection.
-        if (key !== 'maxTokens' && !sameRoute(config, record.lastApplied)) continue
-        if (config[key] !== record.lastApplied[key]) continue
-        if (record.original[key] === undefined) delete underlying[key]
-        else underlying[key] = record.original[key]
-      }
-    }
-    record.original = routeConfig(underlying)
-    return underlying
-  }
-
   function attach(agent) {
     if (stopped || !agent || attached.get(agent.id)?.agent === agent) return
     attached.get(agent.id)?.dispose()
     const supported = supportedAgent(ctx, agent)
-    const currentHeader = agent.session.requestHeader?.()
-    const record = { agent, supported, presetId: presetFor(agent), snapshot: null, snapshotSignal: null,
-      pending: false, stepOpen: false, draining: null, lastApplied: null, ownedFields: new Set(),
-      original: routeConfig(currentHeader ? headerProposal(currentHeader) : { ...ctx.get('agentDefaultModel')?.currentSelection?.(), ...agent.options }),
-      disposers: [],
-    }
-    record.stopRequest = () => { record.disposeRequest?.(); record.disposeRequest = null }
-    record.dispose = keepRequest => {
-      for (const dispose of record.disposers.splice(0)) dispose()
-      if (!keepRequest) record.stopRequest()
-    }
+    const record = { agent, supported, presetId: presetFor(agent), disposers: [] }
+    record.dispose = () => { record.router?.dispose(); for (const dispose of record.disposers.splice(0)) dispose() }
     attached.set(agent.id, record)
     sessions.set(agent.id, { presetId: record.presetId })
-    // Acquisition is already scoped to this live Agent. Only metadata leaves
-    // the public snapshot reader; browser reads go through owner Remote.
     for (const event of agent.session.snapshotEvents?.() ?? []) observe(agent.id, event, record.presetId)
     if (!supported) return
-    record.disposers.push(agent.ctx.on('system-prompt/assemble', async (_assembly, context, next) => {
-      if (stopped || (context.agent && context.agent !== agent)) return next()
-      const position = stateFor(agent.id)
-      const nodeId = modelNodeId(position.step + 1)
-      const { policies } = store.read({ sessionId: agent.id, presetId: record.presetId })
-      // Capture before delegating: downstream async work cannot split policy
-      // edits across prompt variables and the following request configuration.
-      const snapshot = freeze({ nodeId, turn: position.turn, step: position.step + 1,
-        route: resolvePolicy(policies.preset, policies.session).routes[nodeId] ?? null })
-      const result = await next()
-      if (stopped) return result
-      const inherited = { provider: result.variables?.provider, model: result.variables?.model }
-      if (inherited.provider && inherited.model && !sameRoute(inherited, record.lastApplied)) record.original = { ...record.original, ...inherited }
-      record.snapshot = snapshot
-      record.snapshotSignal = context.signal
-      record.pending = true
-      const selected = snapshot.route ?? (record.lastApplied ? record.original : null)
-      return selected ? { ...result, variables: { ...result.variables, provider: selected.provider, model: selected.model } } : result
-    }, { prepend: true }))
-    record.disposeRequest = agent.ctx.on('agent/request', async (payload, next) => {
-      const snapshot = record.snapshot
-      const result = await next()
-      if (!snapshot || snapshot.step !== payload.step || (snapshot.turn !== undefined && snapshot.turn !== payload.turn)
-        || payload.signal.aborted || record.snapshotSignal?.aborted || (stopped && record.draining !== snapshot)) return result
-      record.pending = false
-      const underlying = baseline(record, result)
-      if (!snapshot.route) return underlying
-      const selected = snapshot.route
-      const proposed = { ...underlying, ...selected }
-      record.ownedFields = new Set(Object.keys(selected))
-      if (!sameRoute(underlying, selected)) {
-        record.ownedFields.add('reasoningEffort')
-        if (selected.reasoningEffort === undefined) delete proposed.reasoningEffort
-      }
-      record.lastApplied = routeConfig(proposed)
-      return proposed
-    }, { prepend: true })
+    record.router = createAgentRouter({ agent, journal,
+      policy: () => { const { policies } = store.read({ sessionId: agent.id, presetId: record.presetId }); return resolvePolicy(policies.preset, policies.session) },
+      position: () => stateFor(agent.id), changed: () => changed(agent.id),
+    })
     record.disposers.push(agent.ctx.on('agent/assistant-stream', ({ frame }) => {
       if (stopped || frame.type === 'chunk') return
       const id = `${agent.id}:attempt:${frame.attemptId}`
@@ -179,18 +113,7 @@ export async function createLoopHost(ctx, options = {}) {
   disposers.push(ctx.on('session/event', (session, event) => {
     const record = attached.get(session.id)
     if (record && record.agent.session !== session) return
-    if (record && (event.type === 'turn/start' || event.type === 'turn/end' || event.type === 'step/end')) {
-      record.snapshot = null
-      record.snapshotSignal = null
-      record.pending = false
-      record.stepOpen = false
-    }
-    if (record && event.type === 'step/start') record.stepOpen = true
     if (event.type === 'agent-preset/selected' && record) record.presetId = event.data.agentPreset
-    if (event.type === 'model/selection' && record) {
-      const { reasoningEffort: _effort, ...original } = record.original
-      record.original = { ...original, ...routeConfig(event.data) }
-    }
     if (observe(session.id, event, record?.presetId ?? sessions.get(session.id)?.presetId)) changed(session.id)
   }))
   for (const agent of ctx.agents.list()) attach(agent)
@@ -260,7 +183,8 @@ export async function createLoopHost(ctx, options = {}) {
       sessions.set(sessionId, { presetId: selectedPresetId })
       const selected = compositions.find(preset => preset.id === selectedPresetId)
       const supported = attached.get(sessionId)?.supported === true
-      if (!supported) diagnostics.push('The active driver is not recognized by the DSH 0.2.1-rc.2 main-loop adapter. Host stages are observe-only.')
+      if (!supported) diagnostics.push('The active driver is not recognized by the DSH 0.2.2-rc.1 main-loop adapter. Host stages are observe-only.')
+      if (attached.get(sessionId)?.router?.fault) diagnostics.push(attached.get(sessionId).router.fault)
       if (selected?.broken) diagnostics.push('The selected preset reports a composition error.')
       const { revision, policies } = store.read({ sessionId, presetId: selectedPresetId })
       return { revision, selectedPresetId,
@@ -288,13 +212,20 @@ export async function createLoopHost(ctx, options = {}) {
       }
       signal?.throwIfAborted()
       const result = await store.savePolicy({ ...input, presetId, policy })
+      for (const record of attached.values()) {
+        if (input.scope === 'preset' ? record.presetId === presetId : record.agent.id === input.sessionId) record.router?.refresh()
+      }
       if (input.scope === 'preset') changedAll()
       else changed(input.sessionId)
       return result
     },
     async resetPolicy(input, signal) {
       const session = await readSession(input.sessionId, signal)
-      const result = await store.resetPolicy({ ...input, presetId: input.presetId ?? session.presetId })
+      const presetId = input.presetId ?? session.presetId
+      const result = await store.resetPolicy({ ...input, presetId })
+      for (const record of attached.values()) {
+        if (input.scope === 'preset' ? record.presetId === presetId : record.agent.id === input.sessionId) record.router?.refresh()
+      }
       if (input.scope === 'preset') changedAll()
       else changed(input.sessionId)
       return result
@@ -350,73 +281,15 @@ export async function createLoopHost(ctx, options = {}) {
       const records = [...attached.values()]
       subscribers.clear()
       participants.clear()
+      const failures = []
       for (const record of records) {
-        const closeSeq = record.agent.session.snapshotEvents?.().at(-1)?.seq ?? -1
-        const restore = () => {
-          const { agent } = record
-          if (!record.lastApplied) return
-          if (ctx.agents.get(agent.id) !== agent) return
-          if (agent.session.snapshotEvents?.().some(event => event.seq > closeSeq && event.type === 'model/selection')) return
-          const header = agent.session.requestHeader?.()
-          if (!header || !sameConfig(headerProposal(header), record.lastApplied)) return
-          const { adapterDefaults: _defaults, ...remaining } = header
-          agent.session.append('request/header', { reason: 'change', header: { ...remaining, config: { ...record.original } } })
-        }
-        const restoreAfterPublication = () => {
-          if (!record.lastApplied) return
-          // Session observers cannot append reentrantly. A continuation may
-          // assemble synchronously before the next microtask, so gate that one
-          // assembly before native model-selection takes its own snapshot.
-          let disposeBeforeAssembly = () => {}
-          const finishRestore = () => { disposeBeforeAssembly(); restore() }
-          disposeBeforeAssembly = record.agent.ctx.on('system-prompt/assemble', async (_assembly, _context, next) => {
-            finishRestore()
-            return next()
-          }, { prepend: true })
-          void Promise.resolve().then(finishRestore).catch(() => {})
-        }
-        const snapshot = record.snapshot
-        if (record.agent.status === 'running' && snapshot && (record.pending || record.stepOpen) && !record.snapshotSignal?.aborted) {
-          // A completed assembly is already bound to this step. Keep only its
-          // request route (including same-step retries), with lifecycle cleanup.
-          // New assembly admissions and trace observers stop immediately.
-          record.draining = snapshot
-          record.dispose(true)
-          let disposeBoundary = () => {}
-          const signal = record.snapshotSignal
-          const finish = () => {
-            disposeBoundary()
-            signal?.removeEventListener('abort', finish)
-            record.draining = null
-            record.snapshot = null
-            record.snapshotSignal = null
-            record.stopRequest()
-          }
-          disposeBoundary = record.agent.ctx.on('session/event', (session, event) => {
-            if (session !== record.agent.session) return
-            const sameTurn = snapshot.turn === undefined || event.data.turn === snapshot.turn
-            if ((event.type === 'step/end' && sameTurn && event.data.step === snapshot.step)
-              || (event.type === 'turn/end' && sameTurn)
-              || (event.type === 'turn/start' && snapshot.turn !== undefined && event.data.turn !== snapshot.turn)) {
-              finish()
-              // The frozen step has ended; restore the logged future baseline
-              // before the next step assembles, without adding a model call.
-              restoreAfterPublication()
-            }
-          })
-          signal?.addEventListener('abort', finish, { once: true })
-          void record.agent.whenIdle().then(() => { finish(); restore() }).catch(finish)
-          continue
-        }
-        record.dispose()
-        // Never deadlock if an agent tool unloads this plugin. Frozen work is
-        // left intact; a running agent's baseline is restored once it is idle.
-        if (record.agent.status === 'running') void record.agent.whenIdle().then(restore).catch(() => {})
-        else restore()
+        for (const dispose of record.disposers.splice(0)) dispose()
+        try { record.router?.close() } catch (error) { failures.push(error) }
       }
       attached.clear()
       sessions.clear()
       traces.clear()
+      if (failures.length) throw new AggregateError(failures, 'Loop Studio route cleanup failed.')
     },
   }
   return service

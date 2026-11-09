@@ -48,3 +48,8 @@ pnpm smoke
 公共 API 修改应同步更新 [架构文档](architecture.md)、现有调用方和对应测试。拓扑编辑需要单独设计执行语义，不能让图控件绕过宿主调度。
 
 发布时更新版本和 `CHANGELOG.md`，使用干净 checkout 运行 check/package/smoke，再将 tgz 与 `SHA256SUMS.txt` 上传到对应 GitHub Release。不要提交 `.runtime`、`artifacts`、node_modules、用户会话或凭据。
+
+
+## DSH 0.2.2-rc.1 路由回归
+
+先构建本插件，将 `DSH_RUNTIME_DIR` 指向匹配版本的 DSH runtime（含 node_modules），再运行 `pnpm test:native-routing`。该入口使用真实 AgentLoop、SessionStore、JSONL 持久层和本地确定性模型，检查路由、重试、取消、卸载及默认输出上限的整进程冷恢复。它不替代 Loader 安装和 Client 界面检查；旧 smoke 的历史结果仅对应其受测版本。
