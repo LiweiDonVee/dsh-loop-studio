@@ -1,0 +1,32 @@
+- id: structure-fixture
+  name: ./structure-probe.mjs
+- id: structure-fixture-source
+  name: '@deepseek-ai/dsh-agent-preset'
+  config:
+    id: structure-fixture-source
+    name: 结构验收源预设
+    description: Synthetic fixture for Loop Studio preset structure acceptance.
+    plugins:
+      - id: fixture-group
+        name: cordis:group
+        group: true
+        isolate:
+          structureFixtureScope: true
+        config:
+          - id: fixture-alpha
+            name: ./structure-source-row.mjs
+            config:
+              marker: SOURCE_ALPHA
+              resource: ./structure-source-resource.txt
+          - id: fixture-beta
+            name: ./structure-source-row.mjs
+            disabled: true
+            config:
+              marker: SOURCE_BETA
+              resource: ./structure-source-resource.txt
+      - id: fixture-condition
+        name: ./structure-source-row.mjs
+        disabled: !!js 'false'
+        config:
+          marker: SOURCE_CONDITION
+          resource: ./structure-source-resource.txt

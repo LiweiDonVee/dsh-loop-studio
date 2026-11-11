@@ -1,80 +1,57 @@
 # DSH Loop Studio
 
-在 DeepSeek Harness 内查看 Agent 的执行流程，并为不同模型节点选择不同的提供方和模型。适用于普通预设、工具型 Agent 和主动接入的插件；无需安装 RP 插件或另开客户端。
+在 DeepSeek Harness 中查看 Agent 的实际模型和工具记录，复制并编辑原生预设，用连线安排每一步模型请求和工具批次。
 
-Native DSH plugin for inspecting agent loops and routing supported model stages independently.
+Native DSH plugin for inspecting Agent loops, editing preset copies, and wiring executable model and tool steps.
 
 [下载安装包](https://github.com/LiweiDonVee/dsh-loop-studio/releases/latest) · [使用指南](docs/usage.md) · [架构与接入 API](docs/architecture.md) · [开发与验证](docs/development.md) · [更新记录](CHANGELOG.md)
 
-![DSH 原生 Loop Studio](docs/images/loop-studio.png)
-
-## 它能做什么
-
-- 展示当前预设声明的插件组成、主循环与实际请求记录。
-- 为每轮的首个模型请求和后续请求分别选择模型；支持接入 DSH 的云端与本地提供方。
-- 为其他插件声明的模型阶段配置路由，例如 RP 预设迁移、模块热组装、最终正文。
-- 设置模型支持的推理强度和输出 token 上限，保存为会话覆盖或预设默认。
-- 对照“当前配置”和“最近实际请求”，检查路由是否真正生效。
-
-0.1 展示并配置已有执行流程，连线不能拖改。图内核、策略、轨迹和宿主适配分离，为后续流程编辑保留接口；本版没有自由编排执行器。程序和工具节点供观察，未识别的自定义驱动也保持观察。
-
 ## 安装
 
-0.1.2 本轮验证目标：**DSH 0.2.2-rc.1**；各次实测结果见[验收记录](docs/acceptance.md)。发布包自包含，不需要 Node、pnpm 或本仓库源码；宿主自带运行环境。
+0.2.0 的目标宿主为 **DSH 0.2.2-rc.1**。安装包包含宿主和客户端入口，由 DSH 自带的运行环境加载。
 
-1. 在 [Releases](https://github.com/LiweiDonVee/dsh-loop-studio/releases/latest) 下载 `dsh-loop-studio-0.1.2.tgz`。
-2. 完全退出 DSH，包括后台进程。在安装包目录打开终端：
+1. 下载 `dsh-loop-studio-0.2.0.tgz`。可用 `Get-FileHash ./dsh-loop-studio-0.2.0.tgz -Algorithm SHA256` 与发布页的 `SHA256SUMS.txt` 核对。 [Releases](https://github.com/LiweiDonVee/dsh-loop-studio/releases)
+2. 完全退出 DSH，在安装包所在目录执行以下命令。Web 模式使用 `--profile web`。
 
-```powershell
-dsh plugin --profile desktop add ./dsh-loop-studio-0.1.2.tgz
-```
+   ```powershell
+   dsh plugin --profile desktop add ./dsh-loop-studio-0.2.0.tgz
+   ```
 
-3. 重启 DSH，单独安装时点击会话顶部的 **Loop**；空白会话的输入区上方也有入口。搭配 **RP Studio 1.5.2** 时，从 **RP ▾ → 流程与模型** 打开；独立 Loop 顶栏入口自动收起，停用 Studio 后恢复。也可从右侧新增页签导航打开 **Loop Studio**。
+3. 启动 DSH，从会话顶部、空白会话输入区上方的 **Loop** 或右侧新增页签打开。搭配支持入口整合的 RP Studio 时，从 **RP ▾ → 流程与模型** 打开。
 
-使用 Web 模式时将 `desktop` 改为 `web`。插件支持宿主侧栏拉宽、全屏和关闭。
-
-如果 Windows 提示找不到 `dsh`，默认安装可使用官方启动器：
+Windows 的默认安装带有官方 CLI 启动器。`dsh` 未加入 PATH 时，在安装包所在目录执行以下命令。自定义安装请使用对应路径。
 
 ```powershell
 $dshCli = Join-Path $env:LOCALAPPDATA 'Programs/DeepSeek Harness/resources/runtime/cli/bin/dsh.cmd'
-& $dshCli plugin --profile desktop add ./dsh-loop-studio-0.1.2.tgz
+& $dshCli plugin --profile desktop add ./dsh-loop-studio-0.2.0.tgz
 ```
 
-自定义安装位置请改为相应启动器路径。升级同样使用 `plugin add` 安装新版本，重启后生效。发布页附 `SHA256SUMS.txt`，可用 `Get-FileHash ./dsh-loop-studio-0.1.2.tgz -Algorithm SHA256` 核对。
+升级同样通过 `plugin add` 安装新版本，随后启动 DSH。
 
-## 第一次配置
+## 创建和使用副本
 
-1. 选择 **首个模型请求**，勾选 **启用模型接管**。
-2. 选择提供方与模型，例如为首步选择响应快的模型。
-3. 选择 **后续模型请求**，按需要配置工具结果处理所用的模型。
-4. 选择保存范围：**当前会话** 或 **此预设的默认配置**，点击 **保存配置**。
-5. 运行下一轮，在节点详情和实际执行记录中检查使用的模型。
+1. 打开 **预设结构**，选择来源预设，点击 **创建可编辑副本**。副本拥有独立的 DSH 预设 ID。
+2. 在 **组件** 编辑插件与分组。可移动、复制和调整声明顺序，也可编辑插件配置、停用条件和服务选项。
+3. 要编排模型与工具，在 **执行编排** 点 **启用连线编排**。选中节点以设置步骤指令、提供方和连线目标。
+4. **保存草稿** 后点击 **发布预设**，确认变更。随后在空白会话的 DSH 预设选择器中选用它，发送消息后到 **执行流程** 查看该会话的版本与实际请求。
 
-配置在下次请求装配时生效，不会改变已经开始的请求。会话覆盖优先于预设默认；关闭会话接管会覆盖已启用的预设默认，**恢复继承** 则删除所选层的配置。模型列表来自 DSH，请先在 DSH 中完成提供方配置。
+使用自定义 Agent 驱动时，可以按宿主顺序运行编辑后的组成。连线编排使用 DSH 自带的 AgentLoop 驱动和兼容的工具执行器。带工具出口的模型步骤使用会话中已准入的工具，工具批次沿用宿主的审批与执行。完整的两次接线示例见 [使用指南](docs/usage.md#试一次不同的请求顺序)。
 
-“首个／后续”按真实步骤区分，后续并不自动等同于“最终回答”。标题生成等辅助调用有自己的宿主机制；插件没有声明接管这些调用。更细的规划、复核或正文阶段，需要执行它们的插件显式接入。
+## 为宿主流程选择模型
 
-## 与 RP 项目的关系
+按宿主顺序执行的会话可以在 **执行流程** 中分别配置 **首个模型请求** 和 **后续模型请求**。在对应节点启用模型接管，选择 DSH 已配置的提供方与模型，将配置保存到 **当前会话** 或 **此预设的默认配置**。下一次请求装配使用已保存的配置，实际提供方与模型会出现在执行记录中。
 
-| 项目 | 负责什么 | 是否必装 |
-| --- | --- | --- |
-| **Loop Studio** | 通用执行图与节点模型配置 | 本仓库 |
-| [RP 最后一步](https://github.com/LiweiDonVee/dsh-rp-last-step) | ST 迁移、热组装、最终正文 | 可选 |
-| [RP Studio](https://github.com/LiweiDonVee/dsh-rp-studio) | 原生故事阅读、角色状态与档案 | 可选 |
-
-RP 最后一步安装后会注册自己的三个模型阶段，Loop Studio 无需包含 RP 逻辑。有无 RP Studio，普通会话的通用流程与模型功能都可使用；RP 菜单只整合入口。界面字体、表单和字号跟随宿主设置。所有模型都必须已经在 DSH 中可用，插件不复制密钥、不启动模型代理，也不在某个模型失败后暗中切换提供方。
+主动接入的插件可声明自己的独立模型阶段。例如 RP 最后一步可分别配置 ST 迁移、热组装和最终正文所用的模型。RP Studio 提供菜单入口整合。这两款插件均为可选安装。 [RP 最后一步](https://github.com/LiweiDonVee/dsh-rp-last-step) · [RP Studio](https://github.com/LiweiDonVee/dsh-rp-studio)
 
 ## 数据与恢复
 
-配置保存在 `$DSH_HOME/app-data/loop-studio/policies.json`；未设置 `DSH_HOME` 时使用 `~/.dsh`。原始预设和宿主全局模型默认值不会被写回。路由归属另存于该目录的 `routing-owners/`，用于冷重开和停用时恢复用户基线；按会话 ID 分文件。关闭 DSH 后可备份该目录。
+草稿与上次成功发布保存在 `$DSH_HOME/app-data/loop-studio/` 下按 profile 区分的结构库文件。路由策略和路由归属也保存在该目录，未设置 `DSH_HOME` 时使用 `~/.dsh`。
 
-界面中的“当前配置”与实际使用的模型可能在一次请求期间不同：已装配的请求使用冻结配置，下次装配才读取修改。若另一个窗口先保存，界面保留本地草稿并提示重新载入；不要通过反复点击保存覆盖版本冲突。
-
-常见问题与卸载时的请求收尾见 [使用指南](docs/usage.md)。
+已开始的会话在同一宿主进程内继续使用已装配的发布版本。新会话选用当前发布，重启后重新装配的会话也使用当前发布。保存、发布与会话选用的具体流程见 [使用指南](docs/usage.md)。
 
 ## 从源码构建
 
-需要 Node.js 24 和 pnpm 11.9；不需要 Electron。
+需要 Node.js 24 和 pnpm 11.9。
 
 ```powershell
 git clone https://github.com/LiweiDonVee/dsh-loop-studio.git
@@ -84,6 +61,6 @@ pnpm check
 pnpm package
 ```
 
-产物为 `artifacts/dsh-loop-studio-0.1.2.tgz` 和 `artifacts/SHA256SUMS.txt`。核心路由回归使用 `DSH_RUNTIME_DIR` 指定匹配宿主的 runtime，然后运行 `pnpm test:native-routing`；安装与 Client 界面检查另行验证。旧 rc.2 smoke 保留为 `pnpm smoke:legacy-rc2`，历史结果不作新版通过依据。说明见 [开发文档](docs/development.md)。
+产物为 `artifacts/dsh-loop-studio-0.2.0.tgz` 和 `artifacts/SHA256SUMS.txt`。原生安装、编排和冷重启的复现命令见 [开发文档](docs/development.md)。
 
-项目使用 MIT 许可证。最初实现源自 [RP Studio 的集成版本](https://github.com/LiweiDonVee/dsh-rp-studio/commit/f0c7cbba469b28b730b8b895ed2250c1d235fc77)，本仓库是 Loop Studio 后续开发与发布的主仓库。
+项目使用 MIT 许可证。本仓库维护 Loop Studio 的独立版本。最初实现源自 [RP Studio 的集成版本](https://github.com/LiweiDonVee/dsh-rp-studio/commit/f0c7cbba469b28b730b8b895ed2250c1d235fc77)。

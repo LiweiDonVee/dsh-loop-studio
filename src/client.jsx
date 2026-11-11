@@ -1,6 +1,8 @@
 import React, { useSyncExternalStore } from 'react'
 import { HeaderEntry, LoopWorkspace } from './LoopWorkspace.jsx'
 import css from './styles.css'
+import presetCss from './preset-editor.css'
+import planCss from './preset-plan.css'
 
 export const inject = ['slots', 'sidebarRight', 'sidebarRightTabs']
 export const TAB_ID = 'dsh-loop-studio/workspace'
@@ -16,7 +18,7 @@ export function apply(ctx) {
   ctx.effect(() => {
     const style = document.createElement('style')
     style.dataset.dshLoopStudio = ''
-    style.textContent = css
+    style.textContent = [css, presetCss, planCss].join('\n')
     document.head.append(style)
     return () => style.remove()
   }, 'Loop Studio styles')
@@ -26,7 +28,7 @@ export function apply(ctx) {
   }
   ctx.effect(() => ctx.sidebarRightTabs.register({
     id: TAB_ID, kind: TAB_KIND, title: () => 'Loop Studio',
-    guide: [{ id: TAB_KIND, order: 36, title: () => 'Loop Studio', description: () => '查看 Agent 执行流程与节点模型' }],
+    guide: [{ id: TAB_KIND, order: 36, title: () => 'Loop Studio', description: () => '查看 Agent 执行流程、配置节点模型与编辑预设' }],
   }), 'Loop Studio tab type')
   ctx.effect(() => ctx.slots.inject('sidebar.right.pane.tab', () => ctx.slots.register({
     name: 'sidebar.right.pane.tab', key: TAB_ID,

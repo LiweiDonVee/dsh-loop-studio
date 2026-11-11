@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createLoopRoutes } from '../src/routes.mjs'
+import { LoopError } from '../src/core.mjs'
 
 function fixture() {
   const listeners = new Set()
@@ -18,7 +19,7 @@ function fixture() {
   return { routes, calls, service, listeners, post, emit }
 }
 
-test('request dispatcher forwards only inspect, savePolicy and resetPolicy DTOs', async () => {
+test('request dispatcher forwards the existing inspect and policy DTOs', async () => {
   const { routes, calls, post } = fixture()
   assert.deepEqual(await (await routes.request(post({ action: 'inspect', sessionId: 'one' }))).json(), { revision: 4, selectedPresetId: 'standard', graph: { nodes: [] } })
   const policy = { enabled: true, routes: { 'host.first': { provider: 'cloud', model: 'fast' } } }
@@ -26,6 +27,40 @@ test('request dispatcher forwards only inspect, savePolicy and resetPolicy DTOs'
   assert.deepEqual(calls[1].input, { sessionId: 'one', scope: 'preset', presetId: 'standard', expectedRevision: 4, policy })
   assert.deepEqual(await (await routes.request(post({ action: 'resetPolicy', sessionId: 'one', scope: 'session', expectedRevision: 5 }))).json(), { revision: 6 })
   routes.close()
+})
+
+test('structure routes forward exact DTOs and exclude client-supplied native resolution and selection', async () => {
+  const { routes, service, calls, post } = fixture()
+  service.readStructure = async (input, signal) => { calls.push({ input, signal }); return { readOnly: true } }
+  service.publishStructure = async (input, signal) => { calls.push({ input, signal }); return { activation: 'ready' } }
+  const read = { action: 'readStructure', sessionId: 'one', sourcePresetId: 'standard' }
+  assert.deepEqual(await (await routes.request(post(read))).json(), { readOnly: true })
+  assert.deepEqual(calls[0].input, { sessionId: 'one', sourcePresetId: 'standard' })
+  assert.ok(calls[0].signal instanceof AbortSignal)
+  const publish = { action: 'publishStructure', sessionId: 'one', draftId: 'draft', expectedRevision: 3 }
+  assert.deepEqual(await (await routes.request(post(publish))).json(), { activation: 'ready' })
+  assert.deepEqual(calls[1].input, { sessionId: 'one', draftId: 'draft', expectedRevision: 3 })
+  for (const malformed of [
+    { ...read, draftId: 'draft' },
+    { ...publish, baseUrl: 'file:///outside/' },
+    { ...publish, expectedRevision: -1 },
+    { ...publish, action: 'selectStructure', presetId: 'other' },
+  ]) assert.equal((await routes.request(post(malformed))).status, 400)
+  assert.equal(calls.length, 2)
+})
+
+test('structure failures expose sanitized issue locations', async () => {
+  const { routes, service, post } = fixture()
+  const issue = { severity: 'error', code: 'activation-failed', message: 'Check this row.', rowId: 'fixture', field: 'name' }
+  service.publishStructure = async () => {
+    const error = new LoopError('activation-failed', 'DSH could not activate this composition.', 422)
+    error.issues = [issue]
+    error.details = { private: 'PRIVATE_CONFIGURATION' }
+    throw error
+  }
+  const response = await routes.request(post({ action: 'publishStructure', sessionId: 'one', draftId: 'draft', expectedRevision: 1 }))
+  assert.equal(response.status, 422)
+  assert.deepEqual((await response.json()).error, { code: 'activation-failed', message: 'DSH could not activate this composition.', issues: [issue] })
 })
 
 test('unknown actions and proxy fields never reach a host operation', async () => {

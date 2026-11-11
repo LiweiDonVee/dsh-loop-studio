@@ -1,7 +1,10 @@
 import React, { useEffect, useId, useRef, useState } from 'react'
 import { createLoopApi } from './api.js'
+import { PresetEditor } from './PresetEditor.jsx'
+import { ViewTabs } from './ViewTabs.jsx'
 
 const api = createLoopApi()
+const workspaceViews = [{ id: 'flow', label: '执行流程' }, { id: 'structure', label: '预设结构' }]
 const emptyPolicy = () => ({ enabled: false, routes: {} })
 const copyPolicy = policy => ({ enabled: policy?.enabled === true, routes: Object.fromEntries(Object.entries(policy?.routes || {}).map(([id, route]) => [id, { ...route }])) })
 const layerPolicy = (detail, scope) => copyPolicy(detail.policies?.[scope] ?? (scope === 'session' ? { enabled: detail.effectivePolicy?.enabled === true, routes: {} } : emptyPolicy()))
@@ -22,17 +25,27 @@ function NodeIcon({ kind }) {
   return <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{kind === 'model' ? <><rect x="5" y="5" width="14" height="14" rx="4" /><path d="M9 1v4m6-4v4M9 19v4m6-4v4M1 9h4m-4 6h4m14-6h4m-4 6h4M9 10h6m-6 4h4" /></> : kind === 'tool' ? <path d="m14 6 4 4m-10 3-5 5a2.1 2.1 0 0 0 3 3l5-5m-2-5a6 6 0 0 1 8-8l-4 4 4 4 4-4a6 6 0 0 1-8 8Z" /> : <><rect x="3" y="5" width="18" height="14" rx="3" /><path d="m7 9 3 3-3 3m6 0h4" /></>}</svg>
 }
 
-function LoopGraph({ graph, selectedId, onSelect, trace, routingCapability, graphRef }) {
+const traceMatchesNode = (item, node, graphId) => item.nodeId === node.id && (!node.executionNodeId || item.graphId === graphId)
+
+function LoopGraph({ graph, selectedId, onSelect, trace, routingCapability, graphRef, executionPublication }) {
   const markerId = `loop-arrow-${useId().replace(/:/g, '')}`
   const nodes = graph.nodes || []
+  const nodesById = new Map(nodes.map(node => [node.id, node]))
   const positions = new Map(nodes.map((node, index) => [node.id, { index, y: 70 + index * 106 }]))
   const height = Math.max(160, nodes.length * 106 + 36)
-  const latestNode = trace[trace.length - 1]?.nodeId
+  const latestNode = trace.findLast(item => {
+    const node = nodesById.get(item.nodeId)
+    return node && traceMatchesNode(item, node, graph.id)
+  })?.nodeId
+  const latestVersion = executionPublication?.latestVersion
   return <section ref={graphRef} className="loop-graph" aria-label="执行流程">
-    <div className="loop-section-heading"><h2>执行流程</h2><span>{nodes.length} 个节点</span></div>
+    <div className="loop-section-heading"><h2>执行流程</h2>{executionPublication ? <span className="loop-plan-versions">
+      <span>当前会话 · 编排 v{executionPublication.version}</span>
+      {latestVersion !== undefined && latestVersion !== executionPublication.version && <span>最新发布 v{latestVersion}</span>}
+    </span> : <span>{nodes.length} 个节点</span>}</div>
     <div className="loop-graph-legend"><span><i className="loop-dot loop-dot-model" />模型节点</span><span><i className="loop-dot" />程序 / 工具</span><span><i className="loop-dot loop-dot-observed" />最近观测</span></div>
     <div className="loop-graph-map" style={{ height }}>
-      <svg className="loop-edges" viewBox={`0 0 360 ${height}`} preserveAspectRatio="none" role="img" aria-label="当前预设的执行连线">
+      <svg className="loop-edges" viewBox={`0 0 360 ${height}`} preserveAspectRatio="none" role="img" aria-label={executionPublication ? '当前会话的发布编排连线' : '当前预设的执行连线'}>
         <defs><marker id={markerId} viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="m1 1 5 3-5 3" fill="none" stroke="currentColor" strokeWidth="1.4" /></marker></defs>
         {(graph.edges || []).map((edge, index) => {
           const from = positions.get(edge.from)
@@ -42,16 +55,29 @@ function LoopGraph({ graph, selectedId, onSelect, trace, routingCapability, grap
           const backward = to.index <= from.index
           const lane = backward ? 22 + index % 2 * 8 : 338 - index % 2 * 8
           const x = backward ? 72 : 288
-          const path = straight ? `M180 ${from.y + 36} V${to.y - 40}` : `M${x} ${from.y} H${lane} V${to.y} H${x + (backward ? -3 : 3)}`
+          const self = edge.from === edge.to
+          const path = straight ? `M180 ${from.y + 36} V${to.y - 40}` : `M${x} ${from.y + (self ? 16 : 0)} H${lane} V${to.y - (self ? 16 : 0)} H${x + (backward ? -3 : 3)}`
           const textX = backward ? lane - 8 : lane + 12
           const textY = (from.y + to.y) / 2
-          return <g key={edge.id}><path d={path} markerEnd={`url(#${markerId})`} /><title>{nodes.find(node => node.id === edge.from)?.label} → {nodes.find(node => node.id === edge.to)?.label}{edge.label ? ` · ${edge.label}` : ''}</title>{edge.label && (straight ? <text x="192" y={textY + 3}>{edge.label}</text> : <text x={textX} y={textY} textAnchor="middle" transform={`rotate(-90 ${textX} ${textY})`}>{edge.label}</text>)}</g>
+          return <g key={edge.id}><path d={path} markerEnd={`url(#${markerId})`} /><title>{nodesById.get(edge.from)?.label} → {nodesById.get(edge.to)?.label}{edge.label ? ` · ${edge.label}` : ''}</title>{edge.label && (straight ? <text x="192" y={textY + 3}>{edge.label}</text> : <text x={textX} y={textY} textAnchor="middle" transform={`rotate(-90 ${textX} ${textY})`}>{edge.label}</text>)}</g>
         })}
       </svg>
-      {nodes.map((node, index) => <button type="button" key={node.id} data-loop-node={node.id} aria-label={node.label} aria-pressed={selectedId === node.id} className={`loop-node loop-node-${node.kind}${latestNode === node.id ? ' is-observed' : ''}`} style={{ top: index * 106 + 34 }} onClick={() => onSelect(node.id)}><span className="loop-node-icon"><NodeIcon kind={node.kind} /></span><span className="loop-node-text"><strong>{node.label}</strong><small>{kindName[node.kind] || node.kind} · {node.control === 'route' && routingCapability === 'supported' ? '可配置' : '仅观察'}</small></span>{latestNode === node.id && <i className="loop-observed-mark" title="最近观测" />}</button>)}
+      {nodes.map((node, index) => {
+        const planned = Boolean(node.executionNodeId)
+        const observed = latestNode === node.id
+        const label = planned ? (node.id === graph.entryNodeId ? '回合入口' : kindName[node.kind] || node.kind)
+          : `${kindName[node.kind] || node.kind} · ${node.control === 'route' && routingCapability === 'supported' ? '可配置' : '仅观察'}`
+        return <button type="button" key={node.id} data-loop-node={node.id} data-loop-plan-node={planned || undefined}
+          aria-label={node.label} aria-pressed={selectedId === node.id} title={planned ? node.label : undefined}
+          className={`loop-node loop-node-${node.kind}${observed ? ' is-observed' : ''}`} style={{ top: index * 106 + 34 }} onClick={() => onSelect(node.id)}>
+          <span className="loop-node-icon"><NodeIcon kind={node.kind} /></span>
+          <span className="loop-node-text"><strong>{node.label}</strong><small>{label}</small></span>
+          {observed && <i className="loop-observed-mark" title="最近观测" />}
+        </button>
+      })}
     </div>
     {!nodes.length && <p className="loop-note">此预设尚未声明可展示的节点。</p>}
-    <p className="loop-graph-caption">连线来自已识别的执行流程。选择节点查看配置与实际请求。</p>
+    <p className="loop-graph-caption">{executionPublication ? '此图显示当前会话已装配的编排。选择节点查看配置与实际请求。' : '连线来自已识别的执行流程。选择节点查看配置与实际请求。'}</p>
   </section>
 }
 
@@ -73,7 +99,7 @@ function tokensLabel(tokens) {
 
 function Activity({ trace, graph }) {
   return <section className="loop-activity" aria-label="实际执行记录"><div className="loop-section-heading"><h2>实际执行记录</h2><span>仅含观测元数据</span></div>{trace.length ? <ol className="loop-trace">{trace.slice(-40).reverse().map((item, index) => {
-    const node = graph.nodes?.find(candidate => candidate.id === item.nodeId)
+    const node = graph.nodes?.find(candidate => traceMatchesNode(item, candidate, graph.id))
     const duration = item.durationMs ?? item.elapsedMs
     return <li key={item.id ?? index}><span className={`loop-trace-dot ${item.status === 'error' || item.status === 'failed' ? 'is-error' : ''}`} /><div className="loop-trace-body"><div className="loop-trace-title"><strong>{item.toolName || node?.label || item.type}</strong><span>{statusName[item.status] || item.status || item.type}</span></div><p>{[item.step !== undefined ? `步骤 ${item.step}` : null, item.provider && item.model ? `${item.provider} / ${item.model}` : item.model, formatTime(item.timestamp)].filter(Boolean).join(' · ')}</p><small>{tokensLabel(item.tokens)}{typeof duration === 'number' ? ` · ${duration} ms` : ''}</small></div></li>
   })}</ol> : <div className="loop-empty-activity"><LoopIcon size={24} /><p>尚无实际执行记录</p><small>在当前会话发起请求后，这里会显示模型、工具和已报告用量。</small></div>}</section>
@@ -83,18 +109,22 @@ function Composition({ detail, presetName }) {
   return <details className="loop-composition"><summary><span>预设组成</span><span>{presetName} · {detail.composition?.length || 0} 项</span></summary><div className="loop-composition-body">{detail.composition?.length ? detail.composition.map((item, index) => <div className="loop-composition-row" key={item.entryId ?? index}><div><strong>{item.moduleName || item.entryId}</strong>{item.condition && <small>{typeof item.condition === 'string' ? item.condition : '包含启用条件'}</small>}</div><span>{item.enabled === 'conditional' ? '条件启用' : item.enabled ? '已启用' : '已停用'}{item.fiberState ? ` · ${item.fiberState}` : ''}</span></div>) : <p className="loop-note">宿主未提供组成信息。</p>}<p className="loop-note">预设声明与实际执行分别展示；条件项以本轮运行结果为准。</p></div></details>
 }
 
-function NodeInspector({ detail, node, draft, scope, onScope, onDraft, busy, dirty, blocked, draftWarning, onReloadDraft, onSave, onReset, inspectorRef, onReturn }) {
+function NodeInspector({ detail, node, draft, scope, onScope, onDraft, busy, dirty, blocked, draftWarning, onReloadDraft, onSave, onReset, inspectorRef, onReturn, onEditExecution }) {
   if (!node) return <aside ref={inspectorRef} className="loop-inspector"><p className="loop-note">选择一个节点查看详情。</p></aside>
-  const canRoute = detail.routingCapability === 'supported' && node.kind === 'model' && node.control === 'route'
-  const observed = [...(detail.trace || [])].reverse().find(item => item.nodeId === node.id && item.model)
+  const planned = Boolean(node.executionNodeId)
+  const publication = detail.executionPublication
+  const canRoute = !planned && detail.routingCapability === 'supported' && node.kind === 'model' && node.control === 'route'
+  const observed = (detail.trace || []).findLast(item => item.model && traceMatchesNode(item, node, detail.graph.id))
   const actualPolicy = detail.effectivePolicy
-  const configured = actualPolicy?.enabled ? actualPolicy.routes?.[node.id] : null
+  const configured = planned ? node.configuredRoute : actualPolicy?.enabled ? actualPolicy.routes?.[node.id] : null
   const route = draft?.routes?.[node.id]
   const providers = [...new Set((detail.models || []).map(model => model.provider))]
   const models = (detail.models || []).filter(model => model.provider === route?.provider)
   const selectedModel = models.find(model => model.id === route?.model)
   const efforts = effortOptions(selectedModel)
   const source = detail.policies?.session?.routes?.[node.id] ? '会话配置' : detail.policies?.preset?.routes?.[node.id] ? '预设默认' : '宿主选择'
+  const planSource = publication ? `发布编排 v${publication.version}` : '发布编排'
+  const configuredSource = planned ? planSource : actualPolicy?.enabled ? source : '接管已关闭'
   const inherited = scope === 'session' && detail.policies?.preset?.enabled ? detail.policies.preset.routes?.[node.id] : null
   const inheritLabel = inherited ? `继承预设默认 · ${routeName(inherited)}` : '继承宿主选择'
   const editingDisabled = busy || blocked
@@ -106,11 +136,14 @@ function NodeInspector({ detail, node, draft, scope, onScope, onDraft, busy, dir
   }
   return <aside ref={inspectorRef} className="loop-inspector" aria-label="节点详情">
     <button type="button" className="loop-return" onClick={onReturn}>← 返回执行流程</button>
-    <div className="loop-inspector-heading"><span className={`loop-kind loop-kind-${node.kind}`}>{kindName[node.kind] || node.kind}</span><span className="loop-source">来源 · {node.source}</span></div>
+    <div className="loop-inspector-heading"><span className={`loop-kind loop-kind-${node.kind}`}>{kindName[node.kind] || node.kind}</span><span className="loop-source">来源 · {planned ? planSource : node.source}</span></div>
     <h2>{node.label}</h2>{node.description && <p className="loop-node-description">{node.description}</p>}
-    {node.kind === 'model' && <div className="loop-route-comparison"><div aria-label="当前配置"><span>当前配置 <small>{actualPolicy?.enabled ? source : '接管已关闭'}</small></span><strong>{routeName(configured)}</strong></div><div aria-label="最近实际请求"><span>最近实际请求</span><strong>{observed ? routeName(observed) : '尚未观测到请求'}</strong></div></div>}
-    {draftWarning && <div className="loop-diagnostics"><p>{draftWarning}</p><div className="loop-form-actions"><button type="button" className="loop-secondary" disabled={busy} onClick={onReloadDraft}>重新载入配置</button></div></div>}
-    {canRoute && draft ? <form onSubmit={onSave} className="loop-route-form">
+    {node.kind === 'model' && <div className="loop-route-comparison"><div aria-label="当前配置"><span>当前配置 <small>{configuredSource}</small></span><strong>{routeName(configured)}</strong></div><div aria-label="最近实际请求"><span>最近实际请求</span><strong>{observed ? routeName(observed) : '尚未观测到请求'}</strong></div></div>}
+    {!planned && draftWarning && <div className="loop-diagnostics"><p>{draftWarning}</p><div className="loop-form-actions"><button type="button" className="loop-secondary" disabled={busy} onClick={onReloadDraft}>重新载入配置</button></div></div>}
+    {planned ? <div className="loop-observe-note">
+      <p>在预设编辑中修改并发布编排后，新会话可采用新版本。</p>
+      {onEditExecution && publication && <div className="loop-form-actions"><button type="button" className="loop-secondary" onClick={() => onEditExecution(publication.presetId)}>编辑执行编排</button></div>}
+    </div> : canRoute && draft ? <form onSubmit={onSave} className="loop-route-form">
       <div className="loop-form-heading"><h3>模型配置</h3>{dirty && <span>未保存</span>}</div>
       <label className="loop-enable"><span><strong>启用模型接管</strong><small>关闭后使用宿主原选择</small></span><input type="checkbox" aria-label="启用模型接管" checked={draft.enabled} disabled={editingDisabled} onChange={event => onDraft({ ...draft, enabled: event.target.checked })} /></label>
       <label className="loop-field"><span>提供方</span><select aria-label="提供方" value={route?.provider || ''} disabled={editingDisabled} onChange={event => {
@@ -146,6 +179,10 @@ function serializablePolicy(draft) {
 }
 
 export function LoopWorkspace({ sessionId, visible = true, client = api }) {
+  const modeId = useId()
+  const [requestedDraft, setRequestedDraft] = useState(null)
+  const [mode, setMode] = useState('flow')
+  const [structureOpened, setStructureOpened] = useState(false)
   const [detail, setDetail] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -196,7 +233,7 @@ export function LoopWorkspace({ sessionId, visible = true, client = api }) {
             if (next.revision >= context.minRevision) {
               context.minRevision = next.revision
               setDetail(next)
-              setSelectedId(previous => next.graph.nodes.some(node => node.id === previous) ? previous : next.graph.nodes[0]?.id)
+              setSelectedId(previous => next.graph.nodes.some(node => node.id === previous) ? previous : (next.graph.entryNodeId ?? next.graph.nodes[0]?.id))
               if (!dirtyRef.current) {
                 draftBase.current = { revision: next.revision, presetId: next.selectedPresetId }
                 setDraft(layerPolicy(next, scopeRef.current))
@@ -278,16 +315,33 @@ export function LoopWorkspace({ sessionId, visible = true, client = api }) {
   const node = detail?.graph?.nodes.find(item => item.id === selectedId)
   const changedPreset = Boolean(dirty && detail && draftBase.current?.presetId !== detail.selectedPresetId)
   const draftWarning = changedPreset ? '当前预设已切换。草稿仍属于先前预设，重新载入后才能保存。' : dirty && (writeError.current || detail?.revision !== draftBase.current?.revision) ? '草稿保留。重新载入配置会丢弃未保存修改，并读取当前配置。' : ''
+  const openMode = next => {
+    setMode(next)
+    if (next === 'structure') setStructureOpened(true)
+  }
+  const openPresetExecution = presetId => {
+    if (!presetId) return
+    setRequestedDraft({ presetId })
+    openMode('structure')
+    workspaceRef.current?.ownerDocument.getElementById(`${modeId}-structure`)?.focus()
+  }
+  const structureMode = mode === 'structure'
   return <div ref={workspaceRef} className="dsh-loop-workspace" data-loop-session={sessionId}>
-    <header className="loop-heading"><div className="loop-heading-title"><span className="loop-brand"><LoopIcon size={16} />LOOP STUDIO</span><h1>Agent Loop</h1></div><button type="button" className="loop-refresh" aria-label="刷新执行流程" title="刷新执行流程" disabled={loading || busy || !sessionId} onClick={() => { void refresh.current() }}><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5m10.4-3A8 8 0 0 0 5.7 5.7L4 8m16 8-1.7 2.3A8 8 0 0 1 4.6 15" /></svg></button></header>
+    <header className="loop-heading"><div className="loop-heading-title"><span className="loop-brand"><LoopIcon size={16} />LOOP STUDIO</span><h1>{structureMode ? '预设结构' : 'Agent Loop'}</h1></div>{!structureMode && <button type="button" className="loop-refresh" aria-label="刷新执行流程" title="刷新执行流程" disabled={loading || busy || !sessionId} onClick={() => { void refresh.current() }}><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5m10.4-3A8 8 0 0 0 5.7 5.7L4 8m16 8-1.7 2.3A8 8 0 0 1 4.6 15" /></svg></button>}</header>
+    <ViewTabs id={modeId} label="Loop Studio 视图" className="loop-mode-tabs" options={workspaceViews} active={mode} onChange={openMode} />
+    <div className="loop-view" role="tabpanel" id={`${modeId}-flow-panel`} aria-labelledby={`${modeId}-flow`} hidden={structureMode}>
     {error && <div role="alert" className="loop-error"><span>{error}</span><button type="button" aria-label="关闭错误提示" onClick={() => { writeError.current = false; setError('') }}>×</button></div>}
     {notice && <div role="status" className="loop-notice">{notice}</div>}
     {!sessionId ? <div className="loop-loading">选择会话以查看执行流程。</div> : loading ? <div className="loop-loading" role="status">正在读取预设与执行流程…</div> : detail ? <div className="loop-scroll">
       <div className="loop-overview"><div><span className="loop-eyebrow">当前会话的预设</span><strong>{presetName}</strong></div><span className={`loop-live ${detail.running ? 'is-running' : connected ? 'is-connected' : ''}`}><i />{detail.running ? '正在执行' : connected ? '已同步' : '等待连接'}</span></div>
       {detail.diagnostics?.length > 0 && <div className="loop-diagnostics">{detail.diagnostics.map((item, index) => <p key={index}>{typeof item === 'string' ? item : item.message || item.code}</p>)}</div>}
       <Composition detail={detail} presetName={presetName} />
-      <div className="loop-main"><LoopGraph graph={detail.graph} selectedId={selectedId} onSelect={selectNode} trace={detail.trace || []} routingCapability={detail.routingCapability} graphRef={graphRef} /><NodeInspector detail={detail} node={node} draft={draft} scope={scope} onScope={changeScope} onDraft={editDraft} busy={busy} dirty={dirty} blocked={changedPreset} draftWarning={draftWarning} onReloadDraft={() => void reloadDraft()} onSave={event => { event.preventDefault(); void persist(false) }} onReset={() => void persist(true)} inspectorRef={inspectorRef} onReturn={() => graphRef.current?.scrollIntoView?.({ block: 'start', behavior: 'smooth' })} /></div>
+      <div className="loop-main"><LoopGraph graph={detail.graph} selectedId={selectedId} onSelect={selectNode} trace={detail.trace || []} routingCapability={detail.routingCapability} executionPublication={detail.executionPublication} graphRef={graphRef} /><NodeInspector detail={detail} node={node} onEditExecution={openPresetExecution} draft={draft} scope={scope} onScope={changeScope} onDraft={editDraft} busy={busy} dirty={dirty} blocked={changedPreset} draftWarning={draftWarning} onReloadDraft={() => void reloadDraft()} onSave={event => { event.preventDefault(); void persist(false) }} onReset={() => void persist(true)} inspectorRef={inspectorRef} onReturn={() => graphRef.current?.scrollIntoView?.({ block: 'start', behavior: 'smooth' })} /></div>
       <Activity trace={detail.trace || []} graph={detail.graph} />
     </div> : <div className="loop-loading">暂时无法读取此会话。点击刷新重试。</div>}
+    </div>
+    <div className="loop-view" role="tabpanel" id={`${modeId}-structure-panel`} aria-labelledby={`${modeId}-structure`} hidden={!structureMode}>
+      {structureOpened && (sessionId ? <PresetEditor key={sessionId} sessionId={sessionId} active={visible && structureMode} client={client} currentPresetId={detail?.selectedPresetId} currentPresetName={presetName} models={detail?.models} requestedDraft={requestedDraft} onSelected={() => { void refresh.current() }} /> : <div className="loop-loading">选择会话后打开预设结构。</div>)}
+    </div>
   </div>
 }

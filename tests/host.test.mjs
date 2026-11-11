@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { createLoopHost } from '../src/host.mjs'
 import { createPolicyStore } from '../src/store.mjs'
 import { createRoutingJournal } from '../src/routing-journal.mjs'
+import { createStarterExecutionPlan } from '../src/plan.mjs'
 
 const equal = (a, b) => JSON.stringify(a) === JSON.stringify(b)
 const selection = value => ({ provider: value.provider, model: value.model, ...(value.reasoningEffort === undefined ? {} : { reasoningEffort: value.reasoningEffort }) })
@@ -69,7 +70,7 @@ async function fixture(t, options = {}) {
     yield { type: 'snapshot', header: agent.session.header, records: agent.records.map(event => ({ type: 'event', event })), cursor: agent.records.length - 1, hasMore: false }
   })() }
   const store = await createPolicyStore({ home }), journal = options.journal ?? createRoutingJournal({ home })
-  const host = await createLoopHost(ctx, { store, journal })
+  const host = await createLoopHost(ctx, { store, journal, structures: options.structures })
   t.after(async () => { await host.close(); await rm(home, { recursive: true, force: true }) })
   let revision = 0
   const save = async (routes, enabled = true, extra = {}) => {
@@ -176,5 +177,42 @@ test('participant routes are namespaced and raw bodies never enter trace metadat
   const detail = await host.inspect('one')
   assert.equal(detail.graph.nodes.find(node => node.id === 'writer.render').control, 'route')
   assert.ok(!JSON.stringify(detail.trace).includes('PRIVATE_BODY'))
+  dispose()
+})
+
+test('structure operations authorize the current session before reaching the editor', async t => {
+  let calls = 0
+  const { ctx, host } = await fixture(t, { structures: { listStructures() { calls++; return { drafts: [] } } } })
+  assert.deepEqual(await host.listStructures({ sessionId: 'one' }), { drafts: [] })
+  ctx.typertGateway.stream = async () => { throw Object.assign(new Error('denied'), { code: 'gateway/forbidden' }) }
+  await assert.rejects(host.listStructures({ sessionId: 'two' }), { code: 'gateway/forbidden' })
+  assert.equal(calls, 1)
+})
+
+test('a bound publication changes live graph and trace IDs without taking over independent participant routes', async t => {
+  const { ctx, agents, host, save } = await fixture(t)
+  const agent = agents.get('one'), presetId = 'loop-studio.fixture'
+  const execution = createStarterExecutionPlan()
+  execution.nodes[0].route = { provider: 'fixture', model: 'published' }
+  execution.nodes[0].instruction = 'PRIVATE_PLAN_INSTRUCTION'
+  const marker = { publication: { presetId, version: 1 }, execution }
+  ctx.get('agentPresets').serviceFor = candidate => candidate === agent ? marker : undefined
+  ctx.get('agentPresets').compositionInventory = async () => [{ id: presetId, rows: [] }]
+  const dispose = host.registerParticipant({ id: 'writer', nodes: [{ id: 'render', label: 'Writer', kind: 'model', control: 'route' }] })
+  agent.session.append('agent-preset/selected', { agentPreset: presetId })
+  await Promise.resolve()
+  const route = { provider: 'fixture', model: 'writer' }
+  await save({ 'host.first': first, 'writer.render': route })
+  assert.equal(agent.model.current().model, 'baseline')
+  assert.deepEqual(host.resolveRoute({ sessionId: 'one', nodeId: 'writer.render' }), route)
+  agent.session.append('turn/start', { turn: 1 })
+  const detail = await host.inspect('one')
+  assert.deepEqual(detail.executionPublication, { presetId, version: 1, mode: 'graph' })
+  assert.equal(detail.graph.entryNodeId, 'host.execution.model')
+  assert.equal(detail.graph.nodes.find(node => node.id === 'writer.render').control, 'route')
+  assert.deepEqual(detail.graph.nodes[0].configuredRoute, execution.nodes[0].route)
+  assert.equal(detail.trace.find(item => item.type === 'turn/start').nodeId, detail.graph.entryNodeId)
+  assert.equal(detail.trace.find(item => item.type === 'turn/start').graphId, detail.graph.id)
+  assert.doesNotMatch(JSON.stringify(detail), /PRIVATE_PLAN_INSTRUCTION/u)
   dispose()
 })
