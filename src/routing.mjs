@@ -6,16 +6,22 @@ const selectionOf = ({ provider, model, reasoningEffort }) => ({ provider, model
 const same = (a, b) => a && b && a.provider === b.provider && a.model === b.model && a.reasoningEffort === b.reasoningEffort
 
 /** rc.1 captures identity before assembly. Only public Model and event APIs write it. */
-export function createAgentRouter({ agent, journal, policy, position, changed }) {
+export function createAgentRouter({ agent, journal, policy, position, changed, manual = false }) {
   const header = agent.session.requestHeader?.()
   let baseline = configOf({ ...agent.options, ...header?.config, ...agent.model.current() })
   if (agent.model.current()?.reasoningEffort === undefined) delete baseline.reasoningEffort
   if (header?.adapterDefaults?.maxTokens) delete baseline.maxTokens
   let lastOwn = null, lastOwnSeq = null, selecting = false, stopped = false, fault = null
-  let currentSnapshot = null, nextNodeId = modelNodeId(position().step + 1), ownMaxTokens
+  let currentSnapshot = null, nextNodeId = manual ? null : modelNodeId(position().step + 1), ownMaxTokens
   let cleanupControls = false, cleanupHeaderMax, requestDispose = () => {}, eventDispose = () => {}
   const snapshots = new WeakMap()
   const disposers = []
+
+  function routeAt(nodeId) {
+    if (nodeId === null) return undefined
+    const { routes } = policy()
+    return Object.hasOwn(routes, nodeId) ? routes[nodeId] : undefined
+  }
 
   function failed(error) {
     fault = `Loop Studio could not prepare its model route: ${error.message}`
@@ -73,7 +79,7 @@ export function createAgentRouter({ agent, journal, policy, position, changed })
     if (stopped) return
     nextNodeId = nodeId
     try {
-      const selected = policy().routes[nodeId]
+      const selected = routeAt(nodeId)
       if (selected) select(selected)
       else restore()
       if (mustSucceed && fault) throw new Error(fault)
@@ -82,14 +88,19 @@ export function createAgentRouter({ agent, journal, policy, position, changed })
       if (mustSucceed) throw new LoopError('routing-failed', fault, 503)
     }
   }
-  function snapshot(context) {
+  function snapshot(context, plannedNodeId) {
     const fixed = context.modelSelection
     if (!fixed) throw new LoopError('routing-failed', 'The DSH driver did not provide a fixed model selection.', 503)
     let value = snapshots.get(fixed)
     if (!value) {
-      const state = position(), nodeId = modelNodeId(state.step + 1)
-      const selected = policy().routes[nodeId]
-      value = Object.freeze({ turn: state.turn, step: state.step + 1, nodeId, signal: context.signal,
+      const state = manual ? context : position()
+      const step = manual ? state.step : state.step + 1
+      const nodeId = manual ? plannedNodeId : modelNodeId(step)
+      const selected = routeAt(nodeId)
+      if (manual && selected && !same(selected, fixed)) {
+        throw new LoopError('routing-failed', 'The model selection changed before the planned step was prepared.', 503)
+      }
+      value = Object.freeze({ turn: state.turn, step, nodeId, signal: context.signal,
         selection: freeze({ ...fixed }), route: freeze(selected && same(selected, fixed) ? { ...selected } : { ...fixed }),
         ...(baseline.maxTokens === undefined ? {} : { baselineMaxTokens: baseline.maxTokens }) })
       snapshots.set(fixed, value)
@@ -98,24 +109,26 @@ export function createAgentRouter({ agent, journal, policy, position, changed })
     return value
   }
 
-  disposers.push(agent.ctx.on('agent/inbox/claimed', () => {
-    refresh(modelNodeId(position().step + 1))
-  }))
-  disposers.push(agent.ctx.on('system-prompt/assemble', async (_assembly, context, next) => {
-    if (!stopped) snapshot(context)
-    return next()
-  }, { prepend: true }))
-  disposers.push(agent.ctx.on('agent/pre-step', async (proposal, next) => {
-    if (fault) throw new LoopError('routing-failed', fault, 503)
-    const selected = snapshot(proposal)
-    const decision = await next()
-    if (decision.kind !== 'reject' && !proposal.signal.aborted && !stopped) refresh('host.continuation')
-    if (fault) throw new LoopError('routing-failed', fault, 503)
-    currentSnapshot = selected
-    return decision
-  }, { prepend: true }))
-  disposers.push(agent.ctx.on('tools/result', () => refresh('host.continuation')))
-  disposers.push(agent.ctx.on('agent/turn-stopping', () => refresh('host.continuation')))
+  if (!manual) {
+    disposers.push(agent.ctx.on('agent/inbox/claimed', () => {
+      refresh(modelNodeId(position().step + 1))
+    }))
+    disposers.push(agent.ctx.on('system-prompt/assemble', async (_assembly, context, next) => {
+      if (!stopped) snapshot(context)
+      return next()
+    }, { prepend: true }))
+    disposers.push(agent.ctx.on('agent/pre-step', async (proposal, next) => {
+      if (fault) throw new LoopError('routing-failed', fault, 503)
+      const selected = snapshot(proposal)
+      const decision = await next()
+      if (decision.kind !== 'reject' && !proposal.signal.aborted && !stopped) refresh('host.continuation')
+      if (fault) throw new LoopError('routing-failed', fault, 503)
+      currentSnapshot = selected
+      return decision
+    }, { prepend: true }))
+    disposers.push(agent.ctx.on('tools/result', () => refresh('host.continuation')))
+    disposers.push(agent.ctx.on('agent/turn-stopping', () => refresh('host.continuation')))
+  }
   requestDispose = agent.ctx.on('agent/request', async (payload, next) => {
     const bound = currentSnapshot
     const result = await next()
@@ -148,7 +161,7 @@ export function createAgentRouter({ agent, journal, policy, position, changed })
       lastOwnSeq = null
       try { journal.clear(agent.session.id) } catch (error) { failed(error) }
     }
-    if (event.type === 'turn/start' || event.type === 'turn/end') nextNodeId = 'host.first'
+    if (!manual && (event.type === 'turn/start' || event.type === 'turn/end')) nextNodeId = 'host.first'
     if (event.type === 'step/end' || event.type === 'turn/end') currentSnapshot = null
     if (stopped && cleanupControls && event.type === 'request/header'
       && (event.data.header.adapterDefaults?.maxTokens === true ? undefined : event.data.header.config.maxTokens) === cleanupHeaderMax && !currentSnapshot) {
@@ -160,6 +173,11 @@ export function createAgentRouter({ agent, journal, policy, position, changed })
 
   return {
     refresh: () => refresh(nextNodeId, true),
+    prepare: nodeId => refresh(nodeId, true),
+    capture(proposal, nodeId) {
+      if (fault) throw new LoopError('routing-failed', fault, 503)
+      if (!stopped) snapshot(proposal, nodeId)
+    },
     get fault() { return fault },
     dispose() { for (const dispose of disposers.splice(0)) dispose(); requestDispose(); eventDispose() },
     close() {

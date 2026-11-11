@@ -1,8 +1,8 @@
 # 开发、构建与验收
 
-## 独立工作区
+## 构建
 
-此仓库不引用 RP Studio 工作区包。开发使用 Node 24、pnpm 11.9，克隆后执行：
+在仓库根使用 Node.js 24、pnpm 11.9。
 
 ```powershell
 pnpm install --frozen-lockfile
@@ -10,46 +10,53 @@ pnpm check
 pnpm package
 ```
 
-`pnpm check` 运行零 warning lint、宿主/内核测试、React 组件测试和生产构建。`pnpm package` 构建 host ESM 与浏览器 ModuleLoader 入口，再生成 tgz 和 SHA256 校验文件。React 由 DSH 提供；发布包移除开发依赖，不要求安装源码工作区。
+`pnpm check` 执行 lint、宿主与内核测试、React 组件测试和构建。`pnpm package` 生成 `artifacts/dsh-loop-studio-0.2.0.tgz` 和 `artifacts/SHA256SUMS.txt`。包中包含 Host ESM、原生浏览器 ModuleLoader 入口和预设执行标记模块。React 由 DSH 提供。
 
 | 命令 | 用途 |
 | --- | --- |
-| `pnpm test:host` | Node 原生测试，覆盖策略、适配、权限与生命周期 |
+| `pnpm test:host` | Node 测试，覆盖策略、结构校验、发布回退、权限与生命周期 |
 | `pnpm test:ui` | Vitest/jsdom 组件与 API 测试 |
 | `pnpm lint` | oxlint，warning 视为失败 |
-| `pnpm build` | 构建原生 host/client |
-| `pnpm package` | 生成 `artifacts/` 安装包与校验文件 |
-| `pnpm smoke` | 使用已安装的官方 DSH 做隔离原生验收 |
+| `pnpm build` | 构建三个入口 |
+| `pnpm test:native-routing` | 以指定 DSH runtime 检查原生模型路由与冷重开 |
+| `pnpm smoke` | 与 `pnpm test:native-routing` 相同 |
+| `pnpm smoke:legacy-rc2` | 0.1 系列的历史 rc.2 复现入口 |
 
-CI 在 Ubuntu 与 Windows 上运行依赖冻结安装、check 和打包，安装包作为 CI artifact 留存。CI 不自动请求真实模型，也不在没有 DSH 安装时声称完成原生 smoke。
+CI 在 Ubuntu 和 Windows 上冻结安装依赖、运行 `check` 并留存安装包。原生验收需要下面的精确宿主，按受测包记录结果。 [GitHub Actions](https://github.com/LiweiDonVee/dsh-loop-studio/actions)
 
-## 原生验收
+## 原生安装与编排验收
 
-先构建安装包，准备官方 DSH（本轮使用 0.2.1-rc.5）和 Playwright Chromium：
+使用 **DSH 0.2.2-rc.1** 的 runtime 目录，其中包含 `node_modules/@deepseek-ai/dsh`。在仓库根执行以下命令，将路径换成自己的 runtime。
 
 ```powershell
+$env:DSH_RUNTIME_DIR = 'C:/path/to/dsh-runtime'
 pnpm exec playwright install chromium
 pnpm package
-pnpm smoke
+node scripts/native-structure.mjs artifacts/dsh-loop-studio-0.2.0.tgz .runtime/native-structure
 ```
 
-默认从 Windows 的官方安装目录找 `dsh.cmd`。自定义位置或其他平台可设置 `DSH_BIN`。已有 Chromium 可设置 `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH`，不必重复下载。
+使用已有 Chromium 时可设置 `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH`。`DSH_NATIVE_NODE` 可指定运行宿主 CLI 的 Node 可执行文件，默认使用当前 Node。
 
-脚本创建 `.runtime/loop-smoke-*` 下的新 DSH home，安装刚生成的包，并注册合成提供方。标准/自定义预设、显式/隐式模型、首步与续步不同路由、关闭恢复、实际 UI 选模型保存、装配后卸载边界、全屏与窄窗口都会检查。模型适配器是本地确定性 fixture，不发送付费请求或读取用户卡库。
+脚本为每次验收创建独立的 `native-*` 目录、DSH home 与 profile，通过宿主管理命令安装指定 tgz。检查已安装入口、普通预设选择器、组件和相对资源解析、连线改动、真实模型步骤与工具结算，以及重启后的发布。模型使用本地确定性 fixture，DSH 负责请求、工具调度与 Session 持久化。
 
-脚本从本仓库 `package.json` 选择对应版本的 `artifacts/` 安装包，并读取实际 CLI 版本。结果和截图在 `.runtime/loop-evidence/`；`acceptance.json` 含受测包 SHA256 和实际宿主版本。支持范围与已验证结果见 [验收记录](acceptance.md)。
+以输出目录的 `acceptance.json`、安装包哈希、宿主版本、进程记录和截图核对实际结果。独立 Web profile 的浏览器验收覆盖原生 DSH Client。Electron Desktop 客户端的验证应记录自己的 profile、版本和操作结果。
 
-0.1.1 的组件回归还检查 Studio 注册/卸载时 header 与 hero 入口同时隐藏/恢复，以及订阅释放。与 RP Studio 1.5.0 联用的聚合菜单、390px 布局和 14px/20px 字体矩阵使用七包隔离原生验收，独立记录受测包与截图；不要用旧版原生记录代替新包证据。
+## 原有模型路由回归
 
-## 维护边界
+同样设置 `DSH_RUNTIME_DIR`，构建后运行以下命令。
 
-修改宿主适配时同时检查装配快照、真正 stream 开始、显式模型切换和卸载收尾。不要在 Session 事件发布回调中同步追加 Session 事件；不要把已准备的 header 当成实际模型请求。
+```powershell
+pnpm build
+$env:DSH_LOOP_EVIDENCE_ROOT = (Join-Path $PWD '.runtime/native-routing')
+pnpm test:native-routing
+```
 
-公共 API 修改应同步更新 [架构文档](architecture.md)、现有调用方和对应测试。拓扑编辑需要单独设计执行语义，不能让图控件绕过宿主调度。
+这个入口使用 DSH 的 AgentLoop、SessionStore、JSONL 持久层与本地确定性模型，检查路由、重试、取消、卸载和模型默认输出上限的整进程冷恢复。默认读取 `dist/host.js`，也可通过 `DSH_LOOP_PRODUCT` 指向已解包的 Host 入口。原生安装和 Client 操作使用上一节的入口。
 
-发布时更新版本和 `CHANGELOG.md`，使用干净 checkout 运行 check/package/smoke，再将 tgz 与 `SHA256SUMS.txt` 上传到对应 GitHub Release。不要提交 `.runtime`、`artifacts`、node_modules、用户会话或凭据。
+旧版证据与其安装包、宿主版本绑定。 [0.1.0 验收记录](acceptance.md) · [0.1.1 验收记录](acceptance-0.1.1.md)
 
+## 维护与发布
 
-## DSH 0.2.2-rc.1 路由回归
+修改结构时检查来源解析位置、条件字段、草稿 revision、激活回退和冷重启。修改编排时核对已提交的模型请求、工具结算、轮次与步骤的边界，并比较实时会话和最新发布使用的版本。`session/event` 负责观察，调度写入走对应的原生步骤与回合边界。
 
-先构建本插件，将 `DSH_RUNTIME_DIR` 指向匹配版本的 DSH runtime（含 node_modules），再运行 `pnpm test:native-routing`。该入口使用真实 AgentLoop、SessionStore、JSONL 持久层和本地确定性模型，检查路由、重试、取消、卸载及默认输出上限的整进程冷恢复。它不替代 Loader 安装和 Client 界面检查；旧 smoke 的历史结果仅对应其受测版本。
+发布时更新版本和变更记录，构建 tgz 并用该包完成验收。GitHub Release 附安装包和同一产物的 `SHA256SUMS.txt`。验收日志和临时 profile 存放在工作区输出目录。 [架构与接入](architecture.md) · [更新记录](../CHANGELOG.md)

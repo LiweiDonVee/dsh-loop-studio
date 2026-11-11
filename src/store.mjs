@@ -1,8 +1,20 @@
 import { mkdir, readFile, writeFile, rename, rm } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { homedir } from 'node:os'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { LoopError, validatePolicy } from './core.mjs'
+
+async function writeJson(path, value, mode) {
+  await mkdir(dirname(path), { recursive: true })
+  const temporary = `${path}.${randomUUID()}.tmp`
+  try {
+    await writeFile(temporary, `${JSON.stringify(value)}\n`, { encoding: 'utf8', flag: 'wx', mode })
+    await rename(temporary, path)
+  } catch (error) {
+    await rm(temporary, { force: true })
+    throw error
+  }
+}
 
 /** One serialized, revisioned policy store per plugin instance/DSH home. */
 export async function createPolicyStore({ home = process.env.DSH_HOME ?? join(homedir(), '.dsh'), directory = join(home, 'app-data', 'loop-studio') } = {}) {
@@ -32,12 +44,7 @@ export async function createPolicyStore({ home = process.env.DSH_HOME ?? join(ho
       if (reset) delete next[table][key]
       else Object.defineProperty(next[table], key, { value: validatePolicy(input.policy), enumerable: true, configurable: true, writable: true })
       next.revision += 1
-      await mkdir(resolve(directory), { recursive: true })
-      const temporary = `${path}.${randomUUID()}.tmp`
-      try {
-        await writeFile(temporary, `${JSON.stringify(next)}\n`, { encoding: 'utf8', flag: 'wx' })
-        await rename(temporary, path)
-      } catch (error) { await rm(temporary, { force: true }); throw error }
+      await writeJson(path, next)
       state = next
       return { revision: state.revision }
     })
@@ -54,5 +61,32 @@ export async function createPolicyStore({ home = process.env.DSH_HOME ?? join(ho
     },
     savePolicy: input => write(input, false),
     resetPolicy: input => write(input, true),
+  }
+}
+
+/** Drafts and the last successful publication share one atomic profile document. */
+export async function createStructureStore({ home = process.env.DSH_HOME ?? join(homedir(), '.dsh'),
+  directory = join(home, 'app-data', 'loop-studio'), profileDir } = {}) {
+  const profile = profileDir ? createHash('sha256').update(resolve(profileDir)).digest('hex') : undefined
+  const path = join(resolve(directory), profile ? `structures.${profile}.json` : 'structures.json')
+  let records = new Map()
+  try {
+    const saved = JSON.parse(await readFile(path, 'utf8'))
+    if (saved.schemaVersion !== 1 || !Array.isArray(saved.drafts)) throw new Error('Unsupported Loop Studio structure data.')
+    for (const record of saved.drafts) {
+      if (typeof record?.id !== 'string' || records.has(record.id)) throw new Error('Invalid Loop Studio structure identity.')
+      records.set(record.id, record)
+    }
+  } catch (error) { if (error.code !== 'ENOENT') throw error }
+
+  return {
+    list: () => structuredClone([...records.values()]),
+    get: id => structuredClone(records.get(id)),
+    publishedVersion: id => records.get(id)?.published?.version,
+    async set(record) {
+      const next = new Map(records).set(record.id, structuredClone(record))
+      await writeJson(path, { schemaVersion: 1, drafts: [...next.values()] }, 0o600)
+      records = next
+    },
   }
 }

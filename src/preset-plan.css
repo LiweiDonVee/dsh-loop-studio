@@ -1,0 +1,273 @@
+.dsh-loop-workspace .loop-plan-editor {
+  --plan-accent: var(--dsw-alias-link, #4176e6);
+  --plan-error: var(--dsw-alias-state-error-primary, #c43838);
+  --plan-size-small: var(--dsh-content-font-size-secondary, var(--loop-secondary-size, 13px));
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  container-type: inline-size;
+}
+
+.dsh-loop-workspace .loop-plan-heading,
+.dsh-loop-workspace .loop-plan-toolbar,
+.dsh-loop-workspace .loop-plan-native {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  min-width: 0;
+}
+
+.dsh-loop-workspace .loop-plan-heading h3,
+.dsh-loop-workspace .loop-plan-heading h4 {
+  margin: 0;
+  font-size: inherit;
+  font-weight: 650;
+}
+
+.dsh-loop-workspace .loop-plan-button {
+  min-height: 31px;
+  max-width: 100%;
+  padding: 3px 8px;
+  border: 1px solid var(--loop-line);
+  border-radius: 6px;
+  background: var(--loop-card);
+  font-size: var(--plan-size-small);
+  overflow-wrap: anywhere;
+}
+
+.dsh-loop-workspace .loop-plan-button:hover:not(:disabled) { background: var(--loop-tint); }
+.dsh-loop-workspace .loop-plan-enable,
+.dsh-loop-workspace .loop-plan-set-entry { color: var(--plan-accent); }
+.dsh-loop-workspace .loop-plan-remove { color: var(--plan-error); }
+
+.dsh-loop-workspace .loop-plan-native,
+.dsh-loop-workspace .loop-plan-details {
+  padding: 13px;
+  border: 1px solid var(--loop-line);
+  border-radius: 9px;
+  background: var(--loop-card);
+}
+
+.dsh-loop-workspace .loop-plan-native p,
+.dsh-loop-workspace .loop-plan-help,
+.dsh-loop-workspace .loop-plan-field small {
+  color: var(--loop-muted);
+  font-size: var(--plan-size-small);
+}
+
+.dsh-loop-workspace .loop-plan-palette {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.dsh-loop-workspace .loop-plan-errors {
+  margin: 0;
+  padding: 8px 10px 8px 28px;
+  border: 1px solid color-mix(in srgb, var(--plan-error) 32%, var(--loop-line));
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--plan-error) 6%, var(--loop-card));
+  font-size: var(--plan-size-small);
+  color: var(--plan-error);
+  overflow-wrap: anywhere;
+}
+
+.dsh-loop-workspace .loop-plan-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: 14px;
+}
+
+.dsh-loop-workspace .loop-plan-map {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.dsh-loop-workspace .loop-plan-canvas {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  gap: 27px;
+  min-width: 0;
+  padding: 25px 29px 19px 24px;
+  border-radius: 8px;
+  background: radial-gradient(var(--loop-line) .75px, transparent .75px) 0 0 / 14px 14px;
+  box-shadow: inset 0 0 0 1px var(--loop-line);
+}
+
+.dsh-loop-workspace .loop-plan-wires {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  color: var(--plan-accent);
+  pointer-events: none;
+}
+
+.dsh-loop-workspace .loop-plan-wire {
+  fill: none;
+  stroke: color-mix(in srgb, var(--plan-accent) 58%, var(--loop-muted));
+  stroke-width: 1.45;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.dsh-loop-workspace .loop-plan-wire[data-when='tools'] { stroke-dasharray: 4 3; }
+.dsh-loop-workspace .loop-plan-wire[data-selected],
+.dsh-loop-workspace .loop-plan-preview { stroke: var(--plan-accent); stroke-width: 2; }
+
+.dsh-loop-workspace .loop-plan-node {
+  position: relative;
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 5px 10px;
+  border: 1px solid var(--loop-line);
+  border-radius: 8px;
+  background: var(--loop-card);
+}
+
+.dsh-loop-workspace .loop-plan-node[data-selected],
+.dsh-loop-workspace .loop-plan-node[data-eligible] {
+  border-color: var(--plan-accent);
+  background: color-mix(in srgb, var(--plan-accent) 5%, var(--loop-card));
+}
+
+.dsh-loop-workspace .loop-plan-node[data-hovered] {
+  background: color-mix(in srgb, var(--plan-accent) 13%, var(--loop-card));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--plan-accent) 24%, transparent);
+}
+
+.dsh-loop-workspace .loop-plan-node[data-issue]:not([data-selected]):not([data-eligible]) { border-color: var(--plan-error); }
+
+.dsh-loop-workspace .loop-plan-node-title,
+.dsh-loop-workspace .loop-plan-output {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0 8px;
+  width: 100%;
+  min-width: 0;
+  padding: 3px 4px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.dsh-loop-workspace .loop-plan-node-title strong { font-weight: 650; }
+.dsh-loop-workspace .loop-plan-node-title small { font-size: var(--plan-size-small); color: var(--loop-muted); }
+.dsh-loop-workspace .loop-plan-node-title:hover,
+.dsh-loop-workspace .loop-plan-output:hover:not(:disabled),
+.dsh-loop-workspace .loop-plan-output[aria-pressed='true'] { background: var(--loop-tint); }
+
+.dsh-loop-workspace .loop-plan-output {
+  position: relative;
+  min-height: 25px;
+  padding-block: 2px;
+  color: var(--loop-muted);
+  font-size: var(--plan-size-small);
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.dsh-loop-workspace .loop-plan-node-input {
+  position: absolute;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  inset-inline-start: -13px;
+  inset-block-start: 7px;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  corner-shape: round;
+  background: transparent;
+}
+
+.dsh-loop-workspace .loop-plan-node-input > span,
+.dsh-loop-workspace .loop-plan-port-dot {
+  width: 9px;
+  height: 9px;
+  border: 1px solid var(--loop-muted);
+  border-radius: 50%;
+  corner-shape: round;
+  background: var(--loop-card);
+}
+
+.dsh-loop-workspace .loop-plan-port-dot {
+  position: absolute;
+  inset-inline-end: -16px;
+  inset-block-start: 50%;
+  transform: translateY(-50%);
+}
+
+.dsh-loop-workspace .loop-plan-port-dot::after { content: ''; position: absolute; inset: -8px; }
+
+.dsh-loop-workspace .loop-plan-output[data-linked] .loop-plan-port-dot,
+.dsh-loop-workspace .loop-plan-output[aria-pressed='true'] .loop-plan-port-dot,
+.dsh-loop-workspace .loop-plan-node[data-eligible] .loop-plan-node-input > span {
+  border-color: var(--plan-accent);
+  background: var(--plan-accent);
+}
+
+.dsh-loop-workspace .loop-plan-details {
+  display: grid;
+  gap: 9px;
+  min-width: 0;
+  scroll-margin-block: 12px;
+}
+
+.dsh-loop-workspace .loop-plan-fields,
+.dsh-loop-workspace .loop-plan-exits {
+  display: grid;
+  gap: 9px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.dsh-loop-workspace .loop-plan-exits { padding-top: 9px; border-top: 1px solid var(--loop-line); }
+.dsh-loop-workspace .loop-plan-set-entry { justify-self: start; }
+
+.dsh-loop-workspace .loop-plan-field {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--plan-size-small);
+}
+
+.dsh-loop-workspace .loop-plan-field :is(input, select, textarea) {
+  width: 100%;
+  min-width: 0;
+  padding: 5px 7px;
+  border: 1px solid var(--loop-line);
+  border-radius: 6px;
+  background: var(--loop-bg);
+  color: var(--loop-text);
+  font: inherit;
+}
+
+.dsh-loop-workspace .loop-plan-field textarea { resize: vertical; }
+.dsh-loop-workspace .loop-plan-field textarea:focus-visible { outline: 2px solid var(--plan-accent); outline-offset: 2px; }
+.dsh-loop-workspace .loop-plan-field [aria-invalid='true'] { border-color: var(--plan-error); }
+.dsh-loop-workspace .loop-plan-limit { grid-template-columns: minmax(0, 1fr) 4.5rem; align-items: center; gap: 8px; }
+
+@container (min-width: 630px) {
+  .dsh-loop-workspace .loop-plan-layout { grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 18px; }
+}
+
+.dsh-loop-workspace .loop-node[data-loop-plan-node] .loop-node-text { overflow: hidden; }
+.dsh-loop-workspace .loop-node[data-loop-plan-node] .loop-node-text strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dsh-loop-workspace .loop-plan-versions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0 8px; text-align: end; }

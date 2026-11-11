@@ -1,6 +1,6 @@
 {
   "name": "dsh-loop-studio",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "原生图形化查看 DSH agent loop，分析预设并配置模型节点",
   "license": "MIT",
   "type": "module",
@@ -8,6 +8,7 @@
   "exports": {
     ".": "./dist/host.js",
     "./client": "./dist/client.js",
+    "./execution": "./dist/execution.js",
     "./package.json": "./package.json"
   },
   "files": [

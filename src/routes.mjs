@@ -1,7 +1,43 @@
 import { LoopError } from './core.mjs'
 
-const failure = (status, code, message) => Response.json({ error: { code, message } }, { status, headers: { 'cache-control': 'no-store' } })
+const structureKeys = {
+  listStructures: [],
+  readStructure: ['draftId', 'sourcePresetId'],
+  createStructure: ['sourcePresetId', 'name', 'description'],
+  saveStructure: ['draftId', 'expectedRevision', 'document'],
+  validateStructure: ['draftId', 'expectedRevision', 'document'],
+  publishStructure: ['draftId', 'expectedRevision'],
+  selectStructure: ['draftId', 'expectedRevision'],
+}
+export const STRUCTURE_ACTIONS = Object.keys(structureKeys)
+const keys = {
+  inspect: ['sessionId'],
+  savePolicy: ['sessionId', 'scope', 'presetId', 'expectedRevision', 'policy'],
+  resetPolicy: ['sessionId', 'scope', 'presetId', 'expectedRevision'],
+  ...Object.fromEntries(STRUCTURE_ACTIONS.map(action => [action, ['sessionId', ...structureKeys[action]]])),
+}
+const id = value => typeof value === 'string' && value.length > 0 && value.length <= 256
+const revision = value => Number.isSafeInteger(value) && value >= 0
+
+function validStructureInput(input) {
+  switch (input.action) {
+    case 'listStructures': return true
+    case 'readStructure':
+      return (id(input.draftId) && input.sourcePresetId === undefined)
+        || (id(input.sourcePresetId) && input.draftId === undefined)
+    case 'createStructure':
+      return id(input.sourcePresetId) && typeof input.name === 'string'
+        && (input.description === undefined || typeof input.description === 'string')
+    default: return id(input.draftId) && revision(input.expectedRevision)
+  }
+}
+
+const failure = (status, code, message, issues) => Response.json({ error: { code, message, ...(issues?.length ? { issues } : {}) } },
+  { status, headers: { 'cache-control': 'no-store' } })
 function errorResponse(error) {
+  if (error instanceof LoopError && ['invalid-structure', 'activation-failed'].includes(error.code)) {
+    return failure(error.status, error.code, error.message, error.issues)
+  }
   if (error instanceof LoopError || ['bad-request', 'revision-conflict', 'unsupported-node'].includes(error?.code)) {
     return failure(error.status ?? 400, error.code, error.message)
   }
@@ -20,11 +56,12 @@ export function createLoopRoutes(service) {
       if (stopped) return failure(503, 'unavailable', 'Loop Studio has been unloaded.')
       let input
       try { input = await request.json() } catch { return failure(400, 'bad-request', 'A JSON request is required.') }
-      const keys = { inspect: ['action', 'sessionId'], savePolicy: ['action', 'sessionId', 'scope', 'presetId', 'expectedRevision', 'policy'], resetPolicy: ['action', 'sessionId', 'scope', 'presetId', 'expectedRevision'] }
-      if (!input || !Object.hasOwn(keys, input.action) || typeof input.sessionId !== 'string' || !input.sessionId || input.sessionId.length > 256
-        || Object.keys(input).some(key => !keys[input.action].includes(key))) return failure(400, 'bad-request', 'Invalid Loop Studio operation.')
-      if (input.action !== 'inspect' && (!['session', 'preset'].includes(input.scope)
-        || !Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 0)) return failure(400, 'bad-request', 'A policy scope and expectedRevision are required.')
+      if (!input || typeof input.action !== 'string' || !Object.hasOwn(keys, input.action) || !id(input.sessionId)
+        || Object.keys(input).some(key => key !== 'action' && !keys[input.action].includes(key))) return failure(400, 'bad-request', 'Invalid Loop Studio operation.')
+      if (input.action === 'savePolicy' || input.action === 'resetPolicy') {
+        if (!['session', 'preset'].includes(input.scope) || !revision(input.expectedRevision)) return failure(400, 'bad-request', 'A policy scope and expectedRevision are required.')
+      }
+      if (Object.hasOwn(structureKeys, input.action) && !validStructureInput(input)) return failure(400, 'bad-request', 'Invalid preset structure operation.')
       try {
         request.signal.throwIfAborted()
         const { action, ...args } = input
